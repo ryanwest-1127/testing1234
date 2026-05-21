@@ -895,3 +895,4 @@ function ReceiptModal({ receipt, close }) {
     </div>
   );
 }
+ 
