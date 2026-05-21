@@ -312,34 +312,66 @@ export default function App() {
           ))}
         </div>
 
-        {tab === 'dashboard' && (
-          <Dashboard
-            visibleClaims={visibleClaims}
-            categoryData={categoryData}
-            weeklyData={weeklyData}
-          />
-        )}
+       {tab === 'dashboard' && (
+  <div className="space-y">
+    <div className="grid grid-3">
+      <Insight
+        title="Total Working Hours"
+        value={`${visibleClaims.reduce((s, c) => s + Number(c.totals?.totalWorkingHours || 0), 0).toFixed(2)} hrs`}
+        note="All submitted / saved claims"
+        icon={<Clock />}
+      />
 
-        {tab === 'timesheet' && (
-          <TimesheetForm
-            {...{
-              employeeInfo,
-              setEmployeeInfo,
-              selectedWeek,
-              setSelectedWeek,
-              timesheet,
-              updateTimesheet,
-              timeInLieu,
-              setTimeInLieu,
-              standardHours,
-              setStandardHours,
-              totals,
-              saveDraft,
-              setTab
-            }}
-          />
-        )}
+      <Insight
+        title="Time in Lieu Remaining"
+        value={`${totals.tilBalance.toFixed(2)} hrs`}
+        note="Current carry forward balance"
+        icon={<FileCheck2 />}
+      />
 
+      <Insight
+        title="This Week Auto OT / TIL"
+        value={`${totals.timeInLieu.toFixed(2)} hrs`}
+        note="Project + Travel + Workshop - standard hours"
+        icon={<TrendingUp />}
+      />
+    </div>
+
+    <div className="grid grid-3">
+      <Insight
+        title="Total Expenses"
+        value={money(visibleClaims.reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0))}
+        note="All visible saved claims"
+        icon={<WalletCards />}
+      />
+
+      <Insight
+        title="Approved / Paid"
+        value={money(visibleClaims.filter(c => ['Approved', 'Paid'].includes(c.status)).reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0))}
+        note="Manager confirmed amount"
+        icon={<CheckCircle2 />}
+      />
+
+      <Insight
+        title="Claims Count"
+        value={String(visibleClaims.length)}
+        note="Draft, submitted and reviewed"
+        icon={<CalendarDays />}
+      />
+    </div>
+
+    <ChartCard title="Expense Categories" sub="By claim history">
+      <ResponsiveContainer width="100%" height={280}>
+        <PieChart>
+          <Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={95} label>
+            {categoryData.map((_, i) => <Cell key={i} />)}
+          </Pie>
+          <Tooltip formatter={v => money(v)} />
+        </PieChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  </div>
+)}
         {tab === 'expense' && (
           <ExpenseForm
             {...{
