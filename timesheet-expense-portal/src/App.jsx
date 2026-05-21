@@ -24,7 +24,6 @@ const fields = [
   'projectHours',
   'travelHours',
   'workshopHours',
-  'timeInLieu',
   'holiday',
   'sickness'
 ];
@@ -34,7 +33,7 @@ const fieldLabels = [
   'Project Hours',
   'Travel',
   'Workshop',
-  'Time in Lieu',
+  'Auto Time in Lieu / OT',
   'Holiday',
   'Sickness'
 ];
@@ -82,7 +81,16 @@ function weekLabel(week) {
   return `Week ${w}, ${y}`;
 }
 
-function calculateTotals(timesheet, expenses, til) {
+function calculateDailyTimeInLieu(row, standardHours) {
+  const worked =
+    Number(row.projectHours || 0) +
+    Number(row.travelHours || 0) +
+    Number(row.workshopHours || 0);
+
+  return Math.max(0, worked - Number(standardHours || 7.5));
+}
+
+function calculateTotals(timesheet, expenses, til, standardHours) {
   const t = {
     projectHours: 0,
     travelHours: 0,
@@ -92,11 +100,13 @@ function calculateTotals(timesheet, expenses, til) {
     sickness: 0
   };
 
-  weekDays.forEach(day => {
-    fields.forEach(f => {
-      t[f] += Number(timesheet[day]?.[f] || 0);
-    });
+ weekDays.forEach(day => {
+  fields.forEach(f => {
+    t[f] += Number(timesheet[day]?.[f] || 0);
   });
+
+  t.timeInLieu += calculateDailyTimeInLieu(timesheet[day], standardHours);
+});
 
   const totalWorkingHours = t.projectHours + t.travelHours + t.workshopHours;
   const totalExpense = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
@@ -121,6 +131,7 @@ export default function App() {
   const [timesheet, setTimesheet] = useState(defaultTimesheet());
   const [expenses, setExpenses] = useState([makeExpense()]);
   const [timeInLieu, setTimeInLieu] = useState({ broughtForward: '0', used: '0', earned: '0' });
+  const [standardHours, setStandardHours] = useState('7.5');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [receipt, setReceipt] = useState(null);
@@ -145,10 +156,10 @@ export default function App() {
     });
   }, [activeUser]);
 
-  const totals = useMemo(
-    () => calculateTotals(timesheet, expenses, timeInLieu),
-    [timesheet, expenses, timeInLieu]
-  );
+ const totals = useMemo(
+  () => calculateTotals(timesheet, expenses, timeInLieu, standardHours),
+  [timesheet, expenses, timeInLieu, standardHours]
+);
 
   const visibleClaims =
     activeUser.role === 'Manager'
@@ -370,26 +381,28 @@ export default function App() {
         )}
 
         {tab === 'submit' && (
-          <SubmitForm
-            {...{
-              employeeInfo,
-              setEmployeeInfo,
-              selectedWeek,
-              setSelectedWeek,
-              timesheet,
-              updateTimesheet,
-              timeInLieu,
-              setTimeInLieu,
-              totals,
-              expenses,
-              setExpenses,
-              updateExpense,
-              uploadReceipt,
-              setReceipt,
-              saveDraft,
-              submit
-            }}
-          />
+        <SubmitForm
+  {...{
+    employeeInfo,
+    setEmployeeInfo,
+    selectedWeek,
+    setSelectedWeek,
+    timesheet,
+    updateTimesheet,
+    timeInLieu,
+    setTimeInLieu,
+    standardHours,
+    setStandardHours,
+    totals,
+    expenses,
+    setExpenses,
+    updateExpense,
+    uploadReceipt,
+    setReceipt,
+    saveDraft,
+    submit
+  }}
+/>
         )}
 
         {tab === 'history' && (
@@ -432,12 +445,19 @@ function SubmitForm(p) {
       <div className="card">
         <div className="card-content">
           <h2>Weekly Timesheet</h2>
+
           <div className="wide">
             <table>
               <thead>
                 <tr>
                   <th>Day</th>
-                  {fieldLabels.map(l => <th key={l}>{l}</th>)}
+                  <th>Project / Job</th>
+                  <th>Project Hours</th>
+                  <th>Travel</th>
+                  <th>Workshop</th>
+                  <th>Auto Time in Lieu / OT</th>
+                  <th>Holiday</th>
+                  <th>Sickness</th>
                   <th>Total</th>
                 </tr>
               </thead>
@@ -445,7 +465,21 @@ function SubmitForm(p) {
               <tbody>
                 {weekDays.map(day => {
                   const row = p.timesheet[day];
-                  const total = fields.reduce((s, f) => s + Number(row[f] || 0), 0);
+
+                  const workedHours =
+                    Number(row.projectHours || 0) +
+                    Number(row.travelHours || 0) +
+                    Number(row.workshopHours || 0);
+
+                  const autoTimeInLieu = Math.max(
+                    0,
+                    workedHours - Number(p.standardHours || 7.5)
+                  );
+
+                  const total =
+                    workedHours +
+                    Number(row.holiday || 0) +
+                    Number(row.sickness || 0);
 
                   return (
                     <tr key={day}>
@@ -461,18 +495,62 @@ function SubmitForm(p) {
                         />
                       </td>
 
-                      {fields.map(f => (
-                        <td key={f}>
-                          <input
-                            className="input"
-                            type="number"
-                            min="0"
-                            step="0.25"
-                            value={row[f]}
-                            onChange={e => p.updateTimesheet(day, f, e.target.value)}
-                          />
-                        </td>
-                      ))}
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          value={row.projectHours}
+                          onChange={e => p.updateTimesheet(day, 'projectHours', e.target.value)}
+                        />
+                      </td>
+
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          value={row.travelHours}
+                          onChange={e => p.updateTimesheet(day, 'travelHours', e.target.value)}
+                        />
+                      </td>
+
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          value={row.workshopHours}
+                          onChange={e => p.updateTimesheet(day, 'workshopHours', e.target.value)}
+                        />
+                      </td>
+
+                      <td><b>{autoTimeInLieu.toFixed(2)}</b></td>
+
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          value={row.holiday}
+                          onChange={e => p.updateTimesheet(day, 'holiday', e.target.value)}
+                        />
+                      </td>
+
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          value={row.sickness}
+                          onChange={e => p.updateTimesheet(day, 'sickness', e.target.value)}
+                        />
+                      </td>
 
                       <td><b>{total.toFixed(2)}</b></td>
                     </tr>
@@ -486,9 +564,27 @@ function SubmitForm(p) {
 
       <div className="card">
         <div className="card-content grid grid-4">
-          <Field label="Time owed brought forward" type="number" value={p.timeInLieu.broughtForward} onChange={v => p.setTimeInLieu({ ...p.timeInLieu, broughtForward: v })} />
-          <Field label="Time earned this week" type="number" value={p.timeInLieu.earned} onChange={v => p.setTimeInLieu({ ...p.timeInLieu, earned: v })} />
-          <Field label="Time taken this week" type="number" value={p.timeInLieu.used} onChange={v => p.setTimeInLieu({ ...p.timeInLieu, used: v })} />
+          <Field
+            label="Daily Standard Hours"
+            type="number"
+            value={p.standardHours}
+            onChange={v => p.setStandardHours(v)}
+          />
+
+          <Field
+            label="Time owed brought forward"
+            type="number"
+            value={p.timeInLieu.broughtForward}
+            onChange={v => p.setTimeInLieu({ ...p.timeInLieu, broughtForward: v })}
+          />
+
+          <Field
+            label="Time taken this week"
+            type="number"
+            value={p.timeInLieu.used}
+            onChange={v => p.setTimeInLieu({ ...p.timeInLieu, used: v })}
+          />
+
           <div className="card-dark">
             <p className="small">Carry Forward</p>
             <h2>{p.totals.tilBalance.toFixed(2)} hrs</h2>
@@ -539,213 +635,11 @@ function SubmitForm(p) {
         <div className="card-content space-y-sm">
           <label className="label">Employee Notes</label>
           <textarea className="textarea" value={p.employeeInfo.notes} onChange={e => p.setEmployeeInfo({ ...p.employeeInfo, notes: e.target.value })} />
+
           <button className="btn secondary" onClick={p.saveDraft}>Save Draft</button>
           {' '}
           <button className="btn" onClick={p.submit}>Submit Claim</button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Metric({ label, value, sub, icon }) {
-  return (
-    <div className="card">
-      <div className="card-content flex justify-between items-center">
-        <div>
-          <p className="small muted">{label}</p>
-          <p className="metric-value">{value}</p>
-          <p className="xsmall muted">{sub}</p>
-        </div>
-        {icon}
-      </div>
-    </div>
-  );
-}
-
-function Insight({ title, value, note, icon }) {
-  return (
-    <div className="card">
-      <div className="card-content flex gap items-center">
-        {icon}
-        <div>
-          <p className="small muted">{title}</p>
-          <p className="metric-value">{value}</p>
-          <p className="xsmall muted">{note}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ChartCard({ title, sub, icon, children }) {
-  return (
-    <div className="card">
-      <div className="card-content">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2>{title}</h2>
-            {sub && <p className="small muted">{sub}</p>}
-          </div>
-          {icon}
-        </div>
-        <div style={{ marginTop: 20 }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, type = 'text' }) {
-  return (
-    <div>
-      <label className="label">{label}</label>
-      <input className="input" type={type} value={value} onChange={e => onChange(e.target.value)} />
-    </div>
-  );
-}
-
-function Filter({ search, setSearch, statusFilter, setStatusFilter, setClaims }) {
-  return (
-    <div className="card">
-      <div className="card-content flex gap" style={{ flexWrap: 'wrap' }}>
-        <div className="flex items-center gap" style={{ flex: 1 }}>
-          <Search size={16} />
-          <input className="input" placeholder="Search employee, email or week..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-
-        <select className="select" style={{ width: 180 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          {['All', 'Draft', 'Submitted', 'Approved', 'Rejected', 'Paid'].map(s => <option key={s}>{s}</option>)}
-        </select>
-
-        <button className="btn secondary" onClick={() => setClaims([])}>
-          <RefreshCw size={16} /> Clear demo data
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ClaimList({ claims, setReceipt, manager, updateClaim }) {
-  if (!claims.length) {
-    return (
-      <div className="card">
-        <div className="card-content muted">No records yet. Submit a claim first.</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-sm">
-      {claims.map(c => (
-        <div className="card" key={c.id}>
-          <div className="card-content">
-            <div className="flex justify-between gap" style={{ flexWrap: 'wrap' }}>
-              <div>
-                <h3>
-                  {c.employeeName} — {c.weekLabel || c.week}
-                  {' '}
-                  <span className={`badge ${c.status}`}>{c.status}</span>
-                </h3>
-                <p className="small muted">
-                  {c.email} • {c.department} {c.submittedAt ? `• Submitted ${c.submittedAt}` : ''}
-                </p>
-              </div>
-
-              <div>
-                <p className="small muted">Expense Total</p>
-                <h2>{money(c.totals?.totalExpense)}</h2>
-              </div>
-            </div>
-
-            <div className="grid grid-4">
-              <Mini label="Working Hours" value={`${c.totals?.totalWorkingHours?.toFixed?.(2) || '0.00'} hrs`} />
-              <Mini label="Travel Hours" value={`${c.totals?.travelHours?.toFixed?.(2) || '0.00'} hrs`} />
-              <Mini label="TIL C/F" value={`${c.totals?.tilBalance?.toFixed?.(2) || '0.00'} hrs`} />
-              <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
-            </div>
-
-            <div className="wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Category</th>
-                    <th>Description</th>
-                    <th>Amount</th>
-                    <th>Proof</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {c.expenses?.map(e => (
-                    <tr key={e.id}>
-                      <td>{e.date || '—'}</td>
-                      <td>{e.category}</td>
-                      <td>{e.description || '—'}</td>
-                      <td><b>{money(e.amount)}</b></td>
-                      <td>
-                        {e.receiptName
-                          ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
-                          : 'Missing'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {manager && (
-              <div className="space-y-sm" style={{ background: '#f8fafc', padding: 16, borderRadius: 20, marginTop: 16 }}>
-                <label className="label">Manager Note</label>
-                <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />
-
-                <button className="btn" onClick={() => updateClaim(c.id, { status: 'Approved' })}>
-                  <CheckCircle2 size={16} /> Approve
-                </button>
-                {' '}
-                <button className="btn danger" onClick={() => updateClaim(c.id, { status: 'Rejected' })}>
-                  <XCircle size={16} /> Reject
-                </button>
-                {' '}
-                <button className="btn secondary" onClick={() => updateClaim(c.id, { status: 'Paid' })}>
-                  Mark as Paid
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Mini({ label, value }) {
-  return (
-    <div style={{ background: '#f8fafc', borderRadius: 16, padding: 12, marginTop: 12 }}>
-      <p className="xsmall muted">{label}</p>
-      <b>{value}</b>
-    </div>
-  );
-}
-
-function ReceiptModal({ receipt, close }) {
-  return (
-    <div className="modal-backdrop" onClick={close}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="flex justify-between">
-          <h2>Receipt Proof</h2>
-          <button className="btn secondary" onClick={close}>Close</button>
-        </div>
-
-        {receipt.receiptPreview?.startsWith('data:image')
-          ? <img className="receipt-thumb" src={receipt.receiptPreview} alt="Receipt" />
-          : (
-            <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', borderRadius: 20 }}>
-              <ReceiptText />
-              <h3>{receipt.receiptName}</h3>
-              <p className="muted">PDF preview will open from Supabase Storage in production.</p>
-            </div>
-          )}
       </div>
     </div>
   );
