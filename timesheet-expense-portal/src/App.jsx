@@ -1035,3 +1035,9 @@ function ReceiptModal({ receipt, close }) {
     </div>
   );
 }
+<button
+  className="btn danger"
+  onClick={() => {
+    localStorage.clear();
+    window.location.reload();
+  }}
