@@ -762,6 +762,16 @@ export default function App() {
           />
         )}
 
+
+        {tab === 'annualLeave' && (
+          <AnnualLeavePage
+            activeUser={activeUser}
+            leaveRequests={leaveRequests}
+            submitLeaveRequest={submitLeaveRequest}
+            updateLeaveRequest={updateLeaveRequest}
+          />
+        )}
+
         {tab === 'history' && (
           <>
             <Filter {...{ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
