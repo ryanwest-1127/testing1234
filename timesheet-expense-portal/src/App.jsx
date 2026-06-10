@@ -416,6 +416,7 @@ export default function App() {
   const [alForm, setAlForm] = useState({ startDate: '', endDate: '', duration: 'full', reason: '' });
   const [alError, setAlError] = useState('');
   const [alMonth, setAlMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [highlightedLeaveId, setHighlightedLeaveId] = useState('');
   const [selectedWeek, setSelectedWeek] = useState('2026-W21');
   const [selectedExpenseMonth, setSelectedExpenseMonth] = useState(currentMonthValue());
 
@@ -854,7 +855,11 @@ export default function App() {
   };
 
   const updateLeaveRequest = (id, patch) => {
-    setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+    setLeaveRequests(prev => prev.map(r => {
+      if (r.id !== id) return r;
+      if (r.status !== 'Submitted') return r;
+      return { ...r, ...patch };
+    }));
   };
 
   const selectAnnualLeaveDate = (date) => {
@@ -883,6 +888,32 @@ export default function App() {
   const leaveRequestsForDate = (date) => {
     const key = formatISODateLocal(date);
     return visibleLeaveRequests.filter(r => getDatesBetween(r.startDate, r.endDate).some(d => formatISODateLocal(d) === key));
+  };
+
+  const findPreviousAnnualLeave = () => {
+    setAlError('');
+
+    const todayKey = formatISODateLocal(new Date());
+    const sortedRequests = [...visibleLeaveRequests]
+      .filter(r => r.startDate)
+      .sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+
+    const previousRequest = sortedRequests.find(r => r.startDate < todayKey) || sortedRequests[0];
+
+    if (!previousRequest) {
+      setAlError('No annual leave request found.');
+      return;
+    }
+
+    setAlMonth(previousRequest.startDate.slice(0, 7));
+    setHighlightedLeaveId(previousRequest.id);
+
+    window.setTimeout(() => {
+      document.getElementById(`leave-row-${previousRequest.id}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }, 50);
   };
 
 
@@ -1054,7 +1085,12 @@ export default function App() {
                   <h2>Annual Leave Calendar</h2>
                   <p className="small muted">Click a date to apply AL. Manager approval deducts from Annual Leave Remaining.</p>
                 </div>
-                <input className="input" type="month" value={alMonth} onChange={e => setAlMonth(e.target.value)} style={{ maxWidth: 180 }} />
+                <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+                  <button className="btn secondary" type="button" onClick={findPreviousAnnualLeave}>
+                    Find Previous AL
+                  </button>
+                  <input className="input" type="month" value={alMonth} onChange={e => setAlMonth(e.target.value)} style={{ maxWidth: 180 }} />
+                </div>
               </div>
             </div>
 
@@ -1167,23 +1203,42 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleLeaveRequests.map(r => (
-                          <tr key={r.id}>
+                        {visibleLeaveRequests.map(r => {
+                          const isLocked = r.status === 'Approved';
+                          const canManagerAction = activeUser.role === 'Manager' && r.status === 'Submitted';
+                          const isHighlighted = highlightedLeaveId === r.id;
+
+                          return (
+                          <tr
+                            key={r.id}
+                            id={`leave-row-${r.id}`}
+                            style={isHighlighted ? { background: '#dbeafe' } : undefined}
+                          >
                             <td>{r.employeeName}</td>
                             <td>{r.startDate} → {r.endDate}</td>
                             <td>{r.duration === 'half' ? 'Half day' : 'Full day'}</td>
                             <td>{calculateLeaveDays(r)}</td>
                             <td><span className={`badge ${r.status}`}>{r.status}</span></td>
-                            <td>{r.reason || '—'}</td>
+                            <td>
+                              {r.reason || '—'}
+                              {isLocked && <div className="xsmall muted">Locked after approval</div>}
+                            </td>
                             {activeUser.role === 'Manager' && (
                               <td>
-                                <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
-                                {' '}
-                                <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
+                                {canManagerAction ? (
+                                  <>
+                                    <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
+                                    {' '}
+                                    <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
+                                  </>
+                                ) : (
+                                  <span className="small muted">Locked</span>
+                                )}
                               </td>
                             )}
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1218,7 +1273,6 @@ export default function App() {
 
 
 function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours, activeUser, selectedWeek }) {
-  const [dashboardView, setDashboardView] = useState('status');
   const [dashboardWeek, setDashboardWeek] = useState('current');
   const cleanVisibleClaims = uniqueClaimsByEmployeeWeekType(visibleClaims);
 
@@ -1227,6 +1281,7 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
 
   const weekOptions = Array.from(new Set(timesheetClaims.map(c => c.week).filter(Boolean))).sort().reverse();
   const latestSubmittedWeek = weekOptions.length ? weekOptions[0] : selectedWeek;
+  const isCurrentStatus = dashboardWeek === 'current';
   const selectedWeekOnly = dashboardWeek === 'current' ? (selectedWeek || latestSubmittedWeek) : dashboardWeek;
   const weekOnlyTimesheetClaims = timesheetClaims.filter(c => c.week === selectedWeekOnly);
 
@@ -1324,28 +1379,14 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
           <div>
             <h2>Dashboard</h2>
             <p className="small muted">
-              Current status shows TIL and expense only. Detailed breakdown contains the weekly hours chart.
+              Select Current for status, or choose a week for detailed breakdown.
             </p>
           </div>
 
           <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className={`tab ${dashboardView === 'status' ? 'active' : ''}`}
-              onClick={() => setDashboardView('status')}
-            >
-              Current Status
-            </button>
-            <button
-              type="button"
-              className={`tab ${dashboardView === 'detail' ? 'active' : ''}`}
-              onClick={() => setDashboardView('detail')}
-            >
-              Detailed Breakdown
-            </button>
             <label className="label">View week</label>
             <select className="select" value={dashboardWeek} onChange={e => setDashboardWeek(e.target.value)} style={{ width: 260 }}>
-              <option value="current">Current data: {weekLabel(selectedWeek || latestSubmittedWeek)}</option>
+              <option value="current">Current status</option>
               {weekOptions.map(week => (
                 <option key={week} value={week}>{weekLabel(week)}</option>
               ))}
@@ -1354,7 +1395,7 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
         </div>
       </div>
 
-      {dashboardView === 'status' && (
+      {isCurrentStatus && (
         <>
           <div className="grid grid-4">
             <Insight
@@ -1401,7 +1442,7 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
         </>
       )}
 
-      {dashboardView === 'detail' && (
+      {!isCurrentStatus && (
         <>
           <div className="grid grid-4">
             <div className="card">
