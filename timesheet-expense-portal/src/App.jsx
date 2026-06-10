@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid
+  Tooltip, ResponsiveContainer, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 import {
   Plus, Trash2, Upload, CheckCircle2, XCircle, Clock,
@@ -1181,6 +1181,7 @@ export default function App() {
 
 
 function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours, activeUser, selectedWeek }) {
+  const [dashboardView, setDashboardView] = useState('status');
   const [dashboardWeek, setDashboardWeek] = useState('current');
   const cleanVisibleClaims = uniqueClaimsByEmployeeWeekType(visibleClaims);
 
@@ -1208,6 +1209,25 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
     .filter(c => ['Approved', 'Paid'].includes(c.status))
     .reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
   const totalExpenses = Math.max(0, totalExpenseClaims - approvedPaidExpenses);
+  const totalVATClaims = expenseClaims.reduce((s, c) => s + Number(c.totals?.totalVAT || 0), 0);
+  const approvedPaidVAT = expenseClaims
+    .filter(c => ['Approved', 'Paid'].includes(c.status))
+    .reduce((s, c) => s + Number(c.totals?.totalVAT || 0), 0);
+
+  const statusChartData = [
+    {
+      name: 'Time in Lieu Remaining',
+      value: Number(latestTilBalance || 0),
+      display: `${Number(latestTilBalance || 0).toFixed(2)} hrs`,
+      fill: '#dc2626'
+    },
+    {
+      name: 'Total Expense',
+      value: Number(totalExpenses || 0),
+      display: money(totalExpenses),
+      fill: '#2563eb'
+    }
+  ];
 
   const targetHours = Number(weeklyStandardHours || 0);
 
@@ -1265,13 +1285,27 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
       <div className="card">
         <div className="card-content flex justify-between gap items-center" style={{ flexWrap: 'wrap' }}>
           <div>
-            <h2>Detailed Report</h2>
+            <h2>Dashboard</h2>
             <p className="small muted">
-              Weekly hours, cumulative TIL, weekly TIL, total expense and daily hours against the 7.5h standard.
+              Current status shows TIL and expense only. Detailed breakdown contains the weekly hours chart.
             </p>
           </div>
 
           <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`tab ${dashboardView === 'status' ? 'active' : ''}`}
+              onClick={() => setDashboardView('status')}
+            >
+              Current Status
+            </button>
+            <button
+              type="button"
+              className={`tab ${dashboardView === 'detail' ? 'active' : ''}`}
+              onClick={() => setDashboardView('detail')}
+            >
+              Detailed Breakdown
+            </button>
             <label className="label">View week</label>
             <select className="select" value={dashboardWeek} onChange={e => setDashboardWeek(e.target.value)} style={{ width: 260 }}>
               <option value="current">Current data: {weekLabel(selectedWeek || latestSubmittedWeek)}</option>
@@ -1283,91 +1317,142 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
         </div>
       </div>
 
-      <div className="grid grid-4">
-        <div className="card">
-          <div className="card-content flex gap items-center">
-            <Clock />
-            <div>
-              <p className="small muted">Total Working Hours</p>
-              <p className="metric-value">{totalSubmittedHours.toFixed(2)} / {targetHours.toFixed(2)} hrs</p>
-              <p className="xsmall muted">Selected week actual / weekly target</p>
-              {activeUser?.role === 'Manager' && (
-                <div style={{ marginTop: 8 }}>
-                  <label className="xsmall muted">Manager weekly target</label>
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    step="0.25"
-                    value={weeklyStandardHours}
-                    onChange={e => setWeeklyStandardHours(e.target.value)}
-                    style={{ maxWidth: 140 }}
-                  />
-                </div>
-              )}
-            </div>
+      {dashboardView === 'status' && (
+        <>
+          <div className="grid grid-4">
+            <Insight
+              title="Time in Lieu Remaining"
+              value={`${Number(latestTilBalance || 0).toFixed(2)} hrs`}
+              note="All saved timesheet records"
+              icon={<FileCheck2 />}
+            />
+            <Insight
+              title="Total Expense"
+              value={money(totalExpenses)}
+              note="All expense claims - approved/paid"
+              icon={<WalletCards />}
+            />
+            <Insight
+              title="All Expense Claims"
+              value={money(totalExpenseClaims)}
+              note={`${expenseClaims.length} saved expense claim(s)`}
+              icon={<ReceiptText />}
+            />
+            <Insight
+              title="Approved / Paid"
+              value={money(approvedPaidExpenses)}
+              note={`VAT in claims: ${money(totalVATClaims)} | approved/paid VAT: ${money(approvedPaidVAT)}`}
+              icon={<CheckCircle2 />}
+            />
           </div>
-        </div>
 
-        <Insight
-          title="Time in Lieu Remaining"
-          value={`${Number(latestTilBalance || 0).toFixed(2)} hrs`}
-          note="All saved timesheet records"
-          icon={<FileCheck2 />}
-        />
+          <ChartCard title="Current Status" sub="Only Time in Lieu Remaining and Total Expense are shown here.">
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={statusChartData} margin={{ left: 20, right: 20, top: 10, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip formatter={(_, __, item) => item?.payload?.display || ''} />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                  {statusChartData.map(item => (
+                    <Cell key={item.name} fill={item.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </>
+      )}
 
-        <Insight
-          title="Time in Lieu This Week"
-          value={`${timeInLieuThisWeek.toFixed(2)} hrs`}
-          note={`${weekLabel(selectedWeekOnly)} only`}
-          icon={<TrendingUp />}
-        />
+      {dashboardView === 'detail' && (
+        <>
+          <div className="grid grid-4">
+            <div className="card">
+              <div className="card-content flex gap items-center">
+                <Clock />
+                <div>
+                  <p className="small muted">Total Working Hours</p>
+                  <p className="metric-value">{totalSubmittedHours.toFixed(2)} / {targetHours.toFixed(2)} hrs</p>
+                  <p className="xsmall muted">Selected week actual / weekly target</p>
+                  {activeUser?.role === 'Manager' && (
+                    <div style={{ marginTop: 8 }}>
+                      <label className="xsmall muted">Manager weekly target</label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        value={weeklyStandardHours}
+                        onChange={e => setWeeklyStandardHours(e.target.value)}
+                        style={{ maxWidth: 140 }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
 
-        <Insight
-          title="Total Expense"
-          value={money(totalExpenses)}
-          note={`All claims ${money(totalExpenseClaims)} - approved/paid ${money(approvedPaidExpenses)}`}
-          icon={<WalletCards />}
-        />
-      </div>
+            <Insight
+              title="Time in Lieu Remaining"
+              value={`${Number(latestTilBalance || 0).toFixed(2)} hrs`}
+              note="All saved timesheet records"
+              icon={<FileCheck2 />}
+            />
 
-      <ChartCard title="Daily Hours Breakdown vs 7.5h Standard" sub="Project / Workshop, Travel, AL / SL / Take back TIL and Time in Lieu are shown separately.">
-        {dailyHoursData.every(item => item.total === 0) ? (
-          <div className="muted" style={{ padding: 24 }}>No timesheet data for this week yet.</div>
-        ) : (
-          <ResponsiveContainer width="100%" height={360}>
-            <BarChart data={dailyHoursData} margin={{ left: 20, right: 20, top: 10, bottom: 30 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="day" angle={-20} textAnchor="end" height={70} />
-              <YAxis />
-              <Tooltip
-                formatter={(value, name) => [
-                  `${Number(value || 0).toFixed(2)} hrs`,
-                  name === 'project'
-                    ? 'Project / Workshop'
-                    : name === 'travel'
-                      ? 'Travel'
-                      : name === 'paidLeaveAndTakeBack'
-                        ? 'AL / SL / Take back TIL'
-                        : 'Time in Lieu'
-                ]}
-                labelFormatter={(label) => `${label}`}
-              />
-              <Bar dataKey="project" stackId="hours" fill="#2563eb" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="travel" stackId="hours" fill="#16a34a" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="paidLeaveAndTakeBack" stackId="hours" fill="#eab308" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="timeInLieu" stackId="hours" fill="#dc2626" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
+            <Insight
+              title="Time in Lieu This Week"
+              value={`${timeInLieuThisWeek.toFixed(2)} hrs`}
+              note={`${weekLabel(selectedWeekOnly)} only`}
+              icon={<TrendingUp />}
+            />
 
-        <div className="flex gap items-center" style={{ marginTop: 12, flexWrap: 'wrap' }}>
-          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#2563eb', borderRadius: 3, marginRight: 6 }} />Project / Workshop</span>
-          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#16a34a', borderRadius: 3, marginRight: 6 }} />Travel</span>
-          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#eab308', borderRadius: 3, marginRight: 6 }} />AL / SL / Take back TIL</span>
-          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#dc2626', borderRadius: 3, marginRight: 6 }} />Time in Lieu over 7.5h</span>
-        </div>
-      </ChartCard>
+            <Insight
+              title="Total Expense"
+              value={money(totalExpenses)}
+              note={`All claims ${money(totalExpenseClaims)} - approved/paid ${money(approvedPaidExpenses)}`}
+              icon={<WalletCards />}
+            />
+          </div>
+
+          <ChartCard title="Daily Hours Breakdown vs 7.5h Standard" sub="Project / Workshop, Travel, AL / SL / Take back TIL and Time in Lieu are shown separately.">
+            {dailyHoursData.every(item => item.total === 0) ? (
+              <div className="muted" style={{ padding: 24 }}>No timesheet data for this week yet.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={360}>
+                <BarChart data={dailyHoursData} margin={{ left: 20, right: 20, top: 10, bottom: 30 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="day" angle={-20} textAnchor="end" height={70} />
+                  <YAxis />
+                  <Tooltip
+                    formatter={(value, name) => [
+                      `${Number(value || 0).toFixed(2)} hrs`,
+                      name === 'project'
+                        ? 'Project / Workshop'
+                        : name === 'travel'
+                          ? 'Travel'
+                          : name === 'paidLeaveAndTakeBack'
+                            ? 'AL / SL / Take back TIL'
+                            : 'Time in Lieu'
+                    ]}
+                    labelFormatter={(label) => `${label}`}
+                  />
+                  <Bar dataKey="project" stackId="hours" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="travel" stackId="hours" fill="#16a34a" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="paidLeaveAndTakeBack" stackId="hours" fill="#eab308" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="timeInLieu" stackId="hours" fill="#dc2626" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+
+            <div className="flex gap items-center" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+              <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#2563eb', borderRadius: 3, marginRight: 6 }} />Project / Workshop</span>
+              <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#16a34a', borderRadius: 3, marginRight: 6 }} />Travel</span>
+              <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#eab308', borderRadius: 3, marginRight: 6 }} />AL / SL / Take back TIL</span>
+              <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#dc2626', borderRadius: 3, marginRight: 6 }} />Time in Lieu over 7.5h</span>
+            </div>
+          </ChartCard>
+        </>
+      )}
     </div>
   );
 }
