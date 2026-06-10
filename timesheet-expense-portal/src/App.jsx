@@ -126,6 +126,7 @@ function makeExpense() {
     category: 'Travel',
     description: '',
     amount: '',
+    vat: '',
     receiptName: '',
     receiptPreview: ''
   };
@@ -223,9 +224,10 @@ function calculateTotals(timesheet, expenses, til, standardHours) {
 
   const totalWorkingHours = t.projectHours + t.travelHours;
   const totalExpense = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  const totalVAT = expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
   const tilBalance = t.timeInLieu - t.takeBackTimeInLieu;
 
-  return { ...t, totalWorkingHours, totalExpense, tilBalance };
+  return { ...t, totalWorkingHours, totalExpense, totalVAT, tilBalance };
 }
 
 
@@ -438,6 +440,11 @@ export default function App() {
     [expenses]
   );
 
+  const currentVATTotal = useMemo(
+    () => expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0),
+    [expenses]
+  );
+
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
 
   const accountClaims =
@@ -563,7 +570,7 @@ export default function App() {
     ...commonClaimFields(status),
     type: 'expense',
     expenses,
-    totals: { totalExpense: currentExpenseTotal }
+    totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
   });
 
   const saveDraft = () => {
@@ -616,13 +623,14 @@ export default function App() {
 
     if (originalType === 'expense') {
       const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+      const vatTotal = expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
 
       updatedClaim = {
         ...editingOriginalClaim,
         week: selectedWeek,
         weekLabel: weekLabel(selectedWeek),
         expenses,
-        totals: { totalExpense: expenseTotal },
+        totals: { totalExpense: expenseTotal, totalVAT: vatTotal },
         status: editingOriginalClaim.status || 'Submitted',
         editedAt: new Date().toLocaleString('en-GB')
       };
@@ -1768,11 +1776,12 @@ function TimesheetForm(p) {
 
 function ExpenseForm(p) {
   const currentExpenseTotal = p.expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  const currentVATTotal = p.expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
 
   return (
     <div className="space-y">
       <div className="card">
-        <div className="card-content grid grid-3">
+        <div className="card-content grid grid-4">
           <div>
             <label className="label">Employee</label>
             {p.activeUser?.role === 'Manager' ? (
@@ -1787,6 +1796,7 @@ function ExpenseForm(p) {
           </div>
           <Mini label="Week" value={weekLabel(p.selectedWeek)} />
           <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
+          <Mini label="Current VAT Total" value={money(currentVATTotal)} />
         </div>
       </div>
 
@@ -1803,7 +1813,7 @@ function ExpenseForm(p) {
           </div>
 
           {p.expenses.map((e, i) => (
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr 2fr 1.5fr auto' }} key={e.id}>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr 2fr 1.5fr auto' }} key={e.id}>
               <input className="input" type="date" value={e.date} onChange={ev => p.updateExpense(i, 'date', ev.target.value)} />
 
               <select className="select" value={e.category} onChange={ev => p.updateExpense(i, 'category', ev.target.value)}>
@@ -1811,6 +1821,7 @@ function ExpenseForm(p) {
               </select>
 
               <input className="input" type="number" placeholder="Amount" value={e.amount} onChange={ev => p.updateExpense(i, 'amount', ev.target.value)} />
+              <input className="input" type="number" placeholder="VAT" value={e.vat || ''} onChange={ev => p.updateExpense(i, 'vat', ev.target.value)} />
               <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
 
               <label className="btn secondary">
@@ -1967,6 +1978,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                 <>
                   <div className="grid grid-4">
                     <Mini label="Expense Total" value={money(c.totals?.totalExpense)} />
+                    <Mini label="VAT Total" value={money(c.totals?.totalVAT)} />
                     <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
                     <Mini label="Items" value={String(c.expenses?.length || 0)} />
                     <Mini label="Status" value={c.status} />
@@ -1980,6 +1992,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                           <th>Category</th>
                           <th>Description</th>
                           <th>Amount</th>
+                          <th>VAT</th>
                           <th>Proof</th>
                         </tr>
                       </thead>
@@ -1991,6 +2004,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                             <td>{e.category}</td>
                             <td>{e.description || '—'}</td>
                             <td><b>{money(e.amount)}</b></td>
+                            <td><b>{money(e.vat)}</b></td>
                             <td>
                               {e.receiptName
                                 ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
