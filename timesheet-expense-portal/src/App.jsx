@@ -314,7 +314,7 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
   const totalWorkingHours = weekOnlyTimesheetClaims.reduce((s, c) => s + Number(c.totals?.totalWorkingHours || 0), 0);
   const targetHours = Number(weeklyStandardHours || 0);
 
-  const timeInLieuRemaining = cumulativeTimesheetClaims.reduce(
+  const timeInLieuRemaining = timesheetClaims.reduce(
     (s, c) => s + Number(c.totals?.timeInLieu || 0) - Number(c.totals?.takeBackTimeInLieu || 0),
     0
   );
@@ -1110,7 +1110,9 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
     0
   );
 
-  const latestTilBalance = cumulativeTimesheetClaims.reduce(
+  const tilBalanceSourceClaims = dashboardWeek === 'current' ? timesheetClaims : cumulativeTimesheetClaims;
+
+  const latestTilBalance = tilBalanceSourceClaims.reduce(
     (s, c) => s + Number(c.totals?.timeInLieu || 0) - Number(c.totals?.takeBackTimeInLieu || 0),
     0
   );
@@ -1204,7 +1206,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         <Insight
           title="Time in Lieu Remaining"
           value={`${Number(latestTilBalance || 0).toFixed(2)} hrs`}
-          note="Cumulative TIL balance"
+          note={dashboardWeek === "current" ? "All saved timesheet records" : "Cumulative to selected week"}
           icon={<FileCheck2 />}
         />
 
