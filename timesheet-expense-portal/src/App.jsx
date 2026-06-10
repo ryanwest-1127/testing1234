@@ -910,31 +910,54 @@ function BusinessWeekPicker({ value, onChange }) {
           }}
         >
           <div className="card-content space-y-sm">
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <select
-                className="select"
-                value={viewMonth}
-                onChange={e => setViewMonth(Number(e.target.value))}
-              >
-                {monthNames.map((name, index) => (
-                  <option key={name} value={index}>{name}</option>
-                ))}
-              </select>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              <div>
+                <label className="xsmall muted">Year</label>
+                <select
+                  className="select"
+                  value={viewYear}
+                  onChange={e => setViewYear(Number(e.target.value))}
+                >
+                  {[currentYear - 1, currentYear, currentYear + 1].map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
 
-              <select
-                className="select"
-                value={viewYear}
-                onChange={e => setViewYear(Number(e.target.value))}
-              >
-                {[currentYear - 1, currentYear, currentYear + 1].map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
+              <div>
+                <label className="xsmall muted">Month</label>
+                <select
+                  className="select"
+                  value={viewMonth}
+                  onChange={e => setViewMonth(Number(e.target.value))}
+                >
+                  {monthNames.map((name, index) => (
+                    <option key={name} value={index}>{name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="xsmall muted">Week</label>
+                <select
+                  className="select"
+                  value={week}
+                  onChange={e => {
+                    const nextValue = makeWeekValue(viewYear, Number(e.target.value));
+                    const nextStart = getBusinessWeekStart(nextValue);
+                    setViewMonth(nextStart.getMonth());
+                    onChange(nextValue);
+                  }}
+                >
+                  {Array.from({ length: getWeeksInBusinessYear(viewYear) }, (_, i) => i + 1).map(w => (
+                    <option key={w} value={w}>Week {w}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div
               style={{
-                display: 'grid',
                 gridTemplateColumns: '58px repeat(7, 1fr)',
                 gap: 6,
                 textAlign: 'center',
