@@ -97,26 +97,9 @@ function weekLabel(week) {
 }
 
 
-function getYearFromWeekValue(weekValue) {
-  return Number(String(weekValue || '').split('-W')[0]) || new Date().getFullYear();
-}
 
-function getWeekNumberFromWeekValue(weekValue) {
-  return Number(String(weekValue || '').split('-W')[1]) || 1;
-}
 
-function makeWeekValue(year, week) {
-  return `${year}-W${String(week).padStart(2, '0')}`;
-}
 
-function getWeeksInYear(year) {
-  const dec31 = new Date(Date.UTC(Number(year), 11, 31));
-  const day = dec31.getUTCDay() || 7;
-  const thursday = new Date(dec31);
-  thursday.setUTCDate(dec31.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
-  return Math.ceil((((thursday - yearStart) / 86400000) + 1) / 7);
-}
 
 function getWeekStartDate(weekValue) {
   if (!weekValue || !weekValue.includes('-W')) return new Date();
@@ -209,39 +192,7 @@ function calculateTotals(timesheet, expenses, til, standardHours) {
 
 
 
-function getDatesBetween(startDate, endDate) {
-  if (!startDate || !endDate) return [];
-  const dates = [];
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
-
-  const d = new Date(start);
-  while (d <= end) {
-    dates.push(new Date(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return dates;
-}
-
-function calculateLeaveDays(request) {
-  if (!request?.startDate || !request?.endDate) return 0;
-  const dates = getDatesBetween(request.startDate, request.endDate);
-  const workingDates = dates.filter(d => {
-    const day = d.getDay();
-    return day !== 0 && day !== 6;
-  });
-  const dayValue = request.duration === 'half' ? 0.5 : 1;
-  return workingDates.length * dayValue;
-}
-
-function calculateApprovedLeaveDays(requests) {
-  return requests
-    .filter(r => r.status === 'Approved')
-    .reduce((sum, r) => sum + calculateLeaveDays(r), 0);
-}
-
-function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
+function getDashboardSummary(claims, selectedWeek, weeklyStandardHours) {
   const timesheetClaims = claims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
   const expenseClaims = claims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
 
@@ -282,7 +233,7 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
     timeInLieuRemaining,
     outstandingExpenses,
     pendingApproval,
-    annualLeaveRemaining: Math.max(0, 28 - calculateApprovedLeaveDays(leaveRequests)),
+    annualLeaveRemaining: 28,
     annualLeaveTotal: 28
   };
 }
@@ -291,7 +242,6 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
 function tabLabel(tab) {
   if (tab === 'timesheet') return 'Timesheet';
   if (tab === 'expense') return 'Expense';
-  if (tab === 'calendar') return 'Calendar / AL';
   return tab[0].toUpperCase() + tab.slice(1);
 }
 
@@ -299,7 +249,6 @@ export default function App() {
   const [tab, setTab] = useState('dashboard');
   const [activeUser, setActiveUser] = useState(employees[0]);
   const [claims, setClaims] = useState([]);
-  const [leaveRequests, setLeaveRequests] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('2026-W21');
 
   const [employeeInfo, setEmployeeInfo] = useState({
@@ -322,15 +271,13 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      setClaims(saved.claims || []);
-      setLeaveRequests(saved.leaveRequests || []);
+      setClaims(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').claims || []);
     } catch {}
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ claims, leaveRequests }));
-  }, [claims, leaveRequests]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ claims }));
+  }, [claims]);
 
   useEffect(() => {
     const user = activeUser.role === 'Manager' ? employees[0] : activeUser;
@@ -348,8 +295,8 @@ export default function App() {
 );
 
   const dashboardSummary = useMemo(
-    () => getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests),
-    [claims, selectedWeek, weeklyStandardHours, leaveRequests]
+    () => getDashboardSummary(claims, selectedWeek, weeklyStandardHours),
+    [claims, selectedWeek, weeklyStandardHours]
   );
 
   const visibleClaims =
@@ -554,24 +501,6 @@ export default function App() {
     });
   };
 
-
-  const submitLeaveRequest = (request) => {
-    const newRequest = {
-      id: crypto.randomUUID(),
-      employeeId: activeUser.id,
-      employeeName: activeUser.name,
-      status: 'Submitted',
-      submittedAt: new Date().toLocaleString('en-GB'),
-      ...request
-    };
-    setLeaveRequests(prev => [newRequest, ...prev]);
-    setTab('calendar');
-  };
-
-  const updateLeaveRequest = (id, patch) => {
-    setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
-  };
-
   return (
     <div className="bg-gradient min-h-screen">
       <div className="container space-y">
@@ -641,7 +570,7 @@ export default function App() {
 
         <div className="tabs">
           <button className="btn danger" onClick={resetDemoData}>Reset Demo Data</button>
-          {['dashboard', 'timesheet', 'expense', 'calendar', 'history', 'manager'].map(t => (
+          {['dashboard', 'timesheet', 'expense', 'history', 'manager'].map(t => (
             <button
               className={`tab ${tab === t ? 'active' : ''}`}
               onClick={() => setTab(t)}
@@ -887,47 +816,6 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
 
 
 
-function CustomWeekSelector({ value, onChange }) {
-  const year = getYearFromWeekValue(value);
-  const week = getWeekNumberFromWeekValue(value);
-  const weeksInYear = getWeeksInYear(year);
-  const weekDates = getWeekDates(value);
-  const currentYear = new Date().getFullYear();
-
-  return (
-    <div className="space-y-sm">
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <select
-          className="select"
-          value={year}
-          onChange={e => onChange(makeWeekValue(Number(e.target.value), Math.min(week, getWeeksInYear(Number(e.target.value)))))}
-        >
-          {[currentYear - 1, currentYear, currentYear + 1].map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
-
-        <select
-          className="select"
-          value={week}
-          onChange={e => onChange(makeWeekValue(year, Number(e.target.value)))}
-        >
-          {Array.from({ length: weeksInYear }, (_, i) => i + 1).map(w => (
-            <option key={w} value={w}>Week {w}</option>
-          ))}
-        </select>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, textAlign: 'center' }}>
-        {weekDates.map(({ day, label }) => (
-          <div key={day} style={{ background: '#f8fafc', borderRadius: 10, padding: 6 }}>
-            <div className="xsmall muted">{day.slice(0, 3)}</div>
-            <b className="small">{label}</b>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function TimesheetForm(p) {
   const weekDates = getWeekDates(p.selectedWeek);
   return (
@@ -939,7 +827,7 @@ function TimesheetForm(p) {
           <Field label="Employee ID" value={p.employeeInfo.employeeId} onChange={v => p.setEmployeeInfo({ ...p.employeeInfo, employeeId: v })} />
           <div>
             <label className="label">Week</label>
-            <CustomWeekSelector value={p.selectedWeek} onChange={p.setSelectedWeek} />
+            <input className="input" type="week" value={p.selectedWeek} onChange={e => p.setSelectedWeek(e.target.value)} />
           </div>
         </div>
       </div>
@@ -1115,259 +1003,6 @@ function TimesheetForm(p) {
           <button className="btn secondary" onClick={p.saveDraft}>Save Timesheet Draft</button>
           {' '}
           <button className="btn" onClick={p.submitTimesheet}>Submit Timesheet</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, updateLeaveRequest }) {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [leaveForm, setLeaveForm] = useState({
-    startDate: '',
-    endDate: '',
-    duration: 'full',
-    reason: ''
-  });
-  const [leaveError, setLeaveError] = useState('');
-
-  const [year, monthNumber] = month.split('-').map(Number);
-  const monthStart = new Date(year, monthNumber - 1, 1);
-  const monthEnd = new Date(year, monthNumber, 0);
-  const firstDay = monthStart.getDay() || 7;
-  const blanks = Array.from({ length: firstDay - 1 });
-  const days = Array.from({ length: monthEnd.getDate() }, (_, i) => new Date(year, monthNumber - 1, i + 1));
-
-  const userRequests = activeUser.role === 'Manager'
-    ? leaveRequests
-    : leaveRequests.filter(r => r.employeeId === activeUser.id);
-
-  const approvedUsed = calculateApprovedLeaveDays(
-    activeUser.role === 'Manager'
-      ? leaveRequests
-      : leaveRequests.filter(r => r.employeeId === activeUser.id)
-  );
-  const annualLeaveTotal = 28;
-  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedUsed);
-
-  const requestDateKeys = (request) =>
-    getDatesBetween(request.startDate, request.endDate)
-      .filter(d => {
-        const day = d.getDay();
-        return day !== 0 && day !== 6;
-      })
-      .map(d => d.toISOString().slice(0, 10));
-
-  const hasOverlappingLeave = (candidate) => {
-    const candidateKeys = new Set(requestDateKeys(candidate));
-    return leaveRequests.some(existing => {
-      if (existing.employeeId !== activeUser.id) return false;
-      if (existing.status === 'Rejected') return false;
-
-      const existingKeys = requestDateKeys(existing);
-      return existingKeys.some(key => candidateKeys.has(key));
-    });
-  };
-
-  const requestsForDate = (date) => {
-    const key = date.toISOString().slice(0, 10);
-    return userRequests.filter(r => getDatesBetween(r.startDate, r.endDate).some(d => d.toISOString().slice(0, 10) === key));
-  };
-
-  const submit = () => {
-    setLeaveError('');
-
-    if (!leaveForm.startDate || !leaveForm.endDate) {
-      setLeaveError('Please select start date and end date.');
-      return;
-    }
-
-    if (new Date(leaveForm.endDate) < new Date(leaveForm.startDate)) {
-      setLeaveError('End date cannot be before start date.');
-      return;
-    }
-
-    const requestedDays = calculateLeaveDays(leaveForm);
-    if (requestedDays <= 0) {
-      setLeaveError('Annual leave must include at least one weekday.');
-      return;
-    }
-
-    if (hasOverlappingLeave(leaveForm)) {
-      setLeaveError('This employee already has an annual leave request on one or more selected dates.');
-      return;
-    }
-
-    submitLeaveRequest(leaveForm);
-    setLeaveForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
-  };
-
-  const monthLabel = monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-
-  return (
-    <div className="space-y">
-      <div className="card">
-        <div className="card-content flex justify-between gap items-center" style={{ flexWrap: 'wrap' }}>
-          <div>
-            <h2>Calendar / Annual Leave</h2>
-            <p className="small muted">
-              Apply annual leave, view leave calendar, and manage approvals. Approved leave is deducted from the 28-day allowance.
-            </p>
-          </div>
-          <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ maxWidth: 180 }} />
-        </div>
-      </div>
-
-      <div className="grid grid-3">
-        <Insight
-          title="Annual Leave Remaining"
-          value={`${annualLeaveRemaining} / ${annualLeaveTotal} days`}
-          note="Approved leave deducted"
-          icon={<CalendarDays />}
-        />
-        <Insight
-          title="Pending AL Requests"
-          value={String(userRequests.filter(r => r.status === 'Submitted').length)}
-          note="Waiting for approval"
-          icon={<Clock />}
-        />
-        <Insight
-          title="Approved AL Used"
-          value={`${approvedUsed} days`}
-          note="Approved requests only"
-          icon={<CheckCircle2 />}
-        />
-      </div>
-
-      <div className="grid grid-2-1">
-        <div className="card">
-          <div className="card-content space-y-sm">
-            <h2>Apply Annual Leave</h2>
-
-            {leaveError && (
-              <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>
-                {leaveError}
-              </div>
-            )}
-
-            <div className="grid grid-2">
-              <Field label="Start Date" type="date" value={leaveForm.startDate} onChange={v => setLeaveForm(p => ({ ...p, startDate: v }))} />
-              <Field label="End Date" type="date" value={leaveForm.endDate} onChange={v => setLeaveForm(p => ({ ...p, endDate: v }))} />
-            </div>
-
-            <div>
-              <label className="label">Duration</label>
-              <select className="select" value={leaveForm.duration} onChange={e => setLeaveForm(p => ({ ...p, duration: e.target.value }))}>
-                <option value="full">Full day</option>
-                <option value="half">Half day</option>
-              </select>
-              <p className="xsmall muted" style={{ marginTop: 6 }}>
-                Selected request: {calculateLeaveDays(leaveForm)} day(s). Weekends are not deducted.
-              </p>
-            </div>
-
-            <div>
-              <label className="label">Reason / Notes</label>
-              <textarea className="textarea" value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} />
-            </div>
-
-            <button className="btn" onClick={submit}>Submit Annual Leave</button>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-content">
-            <div className="flex justify-between items-center" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                <h2>{monthLabel}</h2>
-                <p className="small muted">Calendar starts Monday. Approved, submitted and rejected leave are shown here.</p>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6 }}>
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <b key={d} className="small muted" style={{ textAlign: 'center' }}>{d}</b>)}
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
-              {blanks.map((_, i) => <div key={`blank-${i}`} />)}
-              {days.map(day => {
-                const items = requestsForDate(day);
-                const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-
-                return (
-                  <div
-                    key={day.toISOString()}
-                    style={{
-                      minHeight: 96,
-                      background: isWeekend ? '#f1f5f9' : '#f8fafc',
-                      borderRadius: 12,
-                      padding: 8,
-                      border: items.length ? '1px solid #cbd5e1' : '1px solid transparent'
-                    }}
-                  >
-                    <div className="flex justify-between items-center">
-                      <b>{day.getDate()}</b>
-                      {isWeekend && <span className="xsmall muted">Weekend</span>}
-                    </div>
-
-                    <div className="space-y-sm" style={{ marginTop: 6 }}>
-                      {items.slice(0, 3).map(item => (
-                        <div key={item.id} className={`badge ${item.status}`} style={{ display: 'block', whiteSpace: 'normal', lineHeight: 1.25 }}>
-                          {item.employeeName} · {item.duration === 'half' ? '½ day' : 'AL'} · {item.status}
-                        </div>
-                      ))}
-                      {items.length > 3 && <span className="xsmall muted">+{items.length - 3} more</span>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-content">
-          <h2>Annual Leave Requests</h2>
-          {userRequests.length === 0 ? (
-            <p className="muted">No annual leave requests yet.</p>
-          ) : (
-            <div className="wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Dates</th>
-                    <th>Duration</th>
-                    <th>Days</th>
-                    <th>Status</th>
-                    <th>Reason</th>
-                    {activeUser.role === 'Manager' && <th>Action</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {userRequests.map(r => (
-                    <tr key={r.id}>
-                      <td>{r.employeeName}</td>
-                      <td>{r.startDate} → {r.endDate}</td>
-                      <td>{r.duration === 'half' ? 'Half day' : 'Full day'}</td>
-                      <td>{calculateLeaveDays(r)}</td>
-                      <td><span className={`badge ${r.status}`}>{r.status}</span></td>
-                      <td>{r.reason || '—'}</td>
-                      {activeUser.role === 'Manager' && (
-                        <td>
-                          <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
-                          {' '}
-                          <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </div>
     </div>
