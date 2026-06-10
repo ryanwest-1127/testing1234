@@ -39,18 +39,20 @@ function getMondayFromWeekValue(weekValue) {
   const [yearStr, weekStr] = weekValue.split('-W');
   const year = Number(yearStr);
   const week = Number(weekStr);
-  const jan4 = new Date(year, 0, 4);
-  const jan4Day = jan4.getDay() || 7;
-  const monday = new Date(jan4);
-  monday.setDate(jan4.getDate() - jan4Day + 1 + (week - 1) * 7);
-  return monday;
+
+  // Custom business week logic:
+  // Week 1 starts from 1 January of that year, so Week 1 never shows December dates.
+  // Week 52/53 stays within December instead of rolling into January of the next year.
+  const start = new Date(year, 0, 1);
+  start.setDate(start.getDate() + (week - 1) * 7);
+  return start;
 }
 
 function getWeekDates(weekValue) {
-  const monday = getMondayFromWeekValue(weekValue);
+  const weekStart = getMondayFromWeekValue(weekValue);
   return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day, index) => {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + index);
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + index);
     return { day, date, label: formatDateDDMMYYYY(date) };
   });
 }
@@ -815,8 +817,11 @@ function TimesheetForm(p) {
           <Field label="Email" value={p.employeeInfo.email} onChange={v => p.setEmployeeInfo({ ...p.employeeInfo, email: v })} />
           <Field label="Employee ID" value={p.employeeInfo.employeeId} onChange={v => p.setEmployeeInfo({ ...p.employeeInfo, employeeId: v })} />
           <div>
-            <label className="label">Week (Mon Tue Wed Thu Fri Sat Sun)</label>
+            <label className="label">Week (M T W T F S S)</label>
             <input className="input" type="week" value={p.selectedWeek} onChange={e => p.setSelectedWeek(e.target.value)} />
+            <div className="week-day-strip small muted" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginTop: 6, textAlign: 'center' }}>
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i}>{d}</span>)}
+            </div>
           </div>
         </div>
       </div>
@@ -980,15 +985,6 @@ function TimesheetForm(p) {
                 })}
               </tbody>
             </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-content grid grid-4">
-          <div className="card-dark">
-            <p className="small">This Week Net TIL</p>
-            <h2>{(p.totals.timeInLieu - p.totals.takeBackTimeInLieu).toFixed(2)} hrs</h2>
           </div>
         </div>
       </div>
