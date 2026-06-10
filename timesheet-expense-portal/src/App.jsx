@@ -850,12 +850,16 @@ function BusinessWeekPicker({ value, onChange }) {
   });
 
   const selectedWeekDates = getWeekDates(value);
-  const weeksInYear = getWeeksInBusinessYear(viewYear);
   const monthStart = new Date(viewYear, viewMonth, 1);
   const monthEnd = new Date(viewYear, viewMonth + 1, 0);
   const firstDay = monthStart.getDay() || 7;
   const blanks = Array.from({ length: firstDay - 1 });
   const monthDays = Array.from({ length: monthEnd.getDate() }, (_, i) => new Date(viewYear, viewMonth, i + 1));
+  const currentYear = new Date().getFullYear();
+
+  const monthNames = Array.from({ length: 12 }, (_, i) =>
+    new Date(viewYear, i, 1).toLocaleDateString('en-GB', { month: 'long' })
+  );
 
   const getWeekFromDate = (date) => {
     const yearStart = new Date(date.getFullYear(), 0, 1);
@@ -875,11 +879,11 @@ function BusinessWeekPicker({ value, onChange }) {
     setOpen(false);
   };
 
-  const changeMonth = (offset) => {
-    const next = new Date(viewYear, viewMonth + offset, 1);
-    setViewYear(next.getFullYear());
-    setViewMonth(next.getMonth());
-  };
+  const calendarCells = [...blanks.map(() => null), ...monthDays];
+  const rows = [];
+  for (let i = 0; i < calendarCells.length; i += 7) {
+    rows.push(calendarCells.slice(i, i + 7));
+  }
 
   return (
     <div style={{ position: 'relative' }}>
@@ -892,10 +896,6 @@ function BusinessWeekPicker({ value, onChange }) {
         {weekLabel(value)} 📅
       </button>
 
-      <div className="small muted" style={{ marginTop: 6 }}>
-        {selectedWeekDates.map(d => d.inYear ? d.label : '—').join('  ·  ')}
-      </div>
-
       {open && (
         <div
           className="card"
@@ -905,51 +905,98 @@ function BusinessWeekPicker({ value, onChange }) {
             top: '100%',
             right: 0,
             marginTop: 8,
-            width: 360,
+            width: 430,
             boxShadow: '0 24px 60px rgba(15,23,42,.18)'
           }}
         >
           <div className="card-content space-y-sm">
-            <div className="flex justify-between items-center">
-              <button type="button" className="btn ghost" onClick={() => changeMonth(-1)}>‹</button>
-              <div style={{ textAlign: 'center' }}>
-                <b>{monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</b>
-                <p className="xsmall muted">Custom business weeks · Monday first</p>
-              </div>
-              <button type="button" className="btn ghost" onClick={() => changeMonth(1)}>›</button>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <select
+                className="select"
+                value={viewMonth}
+                onChange={e => setViewMonth(Number(e.target.value))}
+              >
+                {monthNames.map((name, index) => (
+                  <option key={name} value={index}>{name}</option>
+                ))}
+              </select>
+
+              <select
+                className="select"
+                value={viewYear}
+                onChange={e => setViewYear(Number(e.target.value))}
+              >
+                {[currentYear - 1, currentYear, currentYear + 1].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, textAlign: 'center' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '58px repeat(7, 1fr)',
+                gap: 6,
+                textAlign: 'center',
+                alignItems: 'center'
+              }}
+            >
+              <b className="xsmall muted">Week</b>
               {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
                 <b key={`${d}-${i}`} className="xsmall muted">{d}</b>
               ))}
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
-              {blanks.map((_, i) => <div key={`blank-${i}`} />)}
-              {monthDays.map(day => {
-                const key = day.toISOString().slice(0, 10);
-                const isSelected = selectedDateKeys.has(key);
-                const weekNumber = getWeekFromDate(day);
+              {rows.map((row, rowIndex) => {
+                const firstDateInRow = row.find(Boolean);
+                const weekNumber = firstDateInRow ? getWeekFromDate(firstDateInRow) : '';
 
                 return (
-                  <button
-                    type="button"
-                    key={key}
-                    onClick={() => pickDate(day)}
-                    title={`Week ${weekNumber}`}
-                    style={{
-                      border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
-                      background: isSelected ? '#dbeafe' : '#fff',
-                      color: '#0f172a',
-                      borderRadius: 10,
-                      minHeight: 44,
-                      cursor: 'pointer',
-                      fontWeight: isSelected ? 700 : 500
-                    }}
-                  >
-                    {day.getDate()}
-                  </button>
+                  <React.Fragment key={`week-row-${rowIndex}`}>
+                    <button
+                      type="button"
+                      className="xsmall muted"
+                      disabled={!firstDateInRow}
+                      onClick={() => firstDateInRow && pickDate(firstDateInRow)}
+                      style={{
+                        border: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        borderRadius: 10,
+                        minHeight: 44,
+                        cursor: firstDateInRow ? 'pointer' : 'default',
+                        fontWeight: 700
+                      }}
+                    >
+                      {weekNumber ? `W${weekNumber}` : ''}
+                    </button>
+
+                    {Array.from({ length: 7 }, (_, dayIndex) => {
+                      const day = row[dayIndex] || null;
+                      if (!day) return <div key={`empty-${rowIndex}-${dayIndex}`} />;
+
+                      const key = day.toISOString().slice(0, 10);
+                      const isSelected = selectedDateKeys.has(key);
+
+                      return (
+                        <button
+                          type="button"
+                          key={key}
+                          onClick={() => pickDate(day)}
+                          title={`Week ${getWeekFromDate(day)}`}
+                          style={{
+                            border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
+                            background: isSelected ? '#dbeafe' : '#fff',
+                            color: '#0f172a',
+                            borderRadius: 10,
+                            minHeight: 44,
+                            cursor: 'pointer',
+                            fontWeight: isSelected ? 700 : 500
+                          }}
+                        >
+                          {day.getDate()}
+                        </button>
+                      );
+                    })}
+                  </React.Fragment>
                 );
               })}
             </div>
