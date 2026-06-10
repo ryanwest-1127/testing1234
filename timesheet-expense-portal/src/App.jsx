@@ -1507,7 +1507,6 @@ function ReadOnlyField({ label, value }) {
 
 
 function AnnualLeavePage({ activeUser, leaveRequests, submitLeaveRequest, updateLeaveRequest }) {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [form, setForm] = useState({ startDate: '', endDate: '', duration: 'full', reason: '' });
   const [error, setError] = useState('');
 
@@ -1520,8 +1519,10 @@ function AnnualLeavePage({ activeUser, leaveRequests, submitLeaveRequest, update
       ? leaveRequests
       : leaveRequests.filter(r => r.employeeId === activeUser.id)
   );
+
   const annualLeaveTotal = 28;
   const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedUsed);
+  const pendingCount = visibleRequests.filter(r => r.status === 'Submitted').length;
 
   const requestDateKeys = (request) =>
     getDatesBetween(request.startDate, request.endDate)
@@ -1542,20 +1543,24 @@ function AnnualLeavePage({ activeUser, leaveRequests, submitLeaveRequest, update
 
   const submit = () => {
     setError('');
+
     if (!form.startDate || !form.endDate) {
       setError('Please select start date and end date.');
       return;
     }
+
     if (new Date(form.endDate) < new Date(form.startDate)) {
       setError('End date cannot be before start date.');
       return;
     }
+
     if (calculateLeaveDays(form) <= 0) {
       setError('Annual leave must include at least one weekday.');
       return;
     }
+
     if (hasOverlap(form)) {
-      setError('This employee already has an annual leave request on one or more selected dates.');
+      setError('This employee already has an AL request on one or more selected dates.');
       return;
     }
 
@@ -1563,97 +1568,64 @@ function AnnualLeavePage({ activeUser, leaveRequests, submitLeaveRequest, update
     setForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
   };
 
-  const [year, monthNumber] = month.split('-').map(Number);
-  const monthStart = new Date(year, monthNumber - 1, 1);
-  const monthEnd = new Date(year, monthNumber, 0);
-  const firstDay = monthStart.getDay() || 7;
-  const blanks = Array.from({ length: firstDay - 1 });
-  const days = Array.from({ length: monthEnd.getDate() }, (_, i) => new Date(year, monthNumber - 1, i + 1));
-
-  const requestsForDate = (date) => {
-    const key = date.toISOString().slice(0, 10);
-    return visibleRequests.filter(r => getDatesBetween(r.startDate, r.endDate).some(d => d.toISOString().slice(0, 10) === key));
-  };
-
   return (
     <div className="space-y">
+      <div className="card">
+        <div className="card-content">
+          <h2>Annual Leave</h2>
+          <p className="small muted">
+            Apply annual leave here. Submitted requests do not deduct balance until manager approval.
+          </p>
+        </div>
+      </div>
+
       <div className="grid grid-3">
         <Insight title="Annual Leave Remaining" value={`${annualLeaveRemaining} / ${annualLeaveTotal} days`} note="Approved AL deducted" icon={<CalendarDays />} />
-        <Insight title="Pending AL" value={String(visibleRequests.filter(r => r.status === 'Submitted').length)} note="Waiting for manager approval" icon={<Clock />} />
+        <Insight title="Pending AL" value={String(pendingCount)} note="Waiting for approval" icon={<Clock />} />
         <Insight title="Approved AL Used" value={`${approvedUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
       </div>
 
-      <div className="grid grid-2-1">
-        <div className="card">
-          <div className="card-content space-y-sm">
-            <h2>Apply Annual Leave</h2>
-            {error && <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>{error}</div>}
+      <div className="card">
+        <div className="card-content space-y-sm">
+          <h2>Apply Annual Leave</h2>
 
-            <div className="grid grid-2">
-              <Field label="Start Date" type="date" value={form.startDate} onChange={v => setForm(p => ({ ...p, startDate: v }))} />
-              <Field label="End Date" type="date" value={form.endDate} onChange={v => setForm(p => ({ ...p, endDate: v }))} />
+          {error && (
+            <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>
+              {error}
             </div>
+          )}
 
+          <div className="grid grid-3">
+            <Field label="Start Date" type="date" value={form.startDate} onChange={v => setForm(p => ({ ...p, startDate: v }))} />
+            <Field label="End Date" type="date" value={form.endDate} onChange={v => setForm(p => ({ ...p, endDate: v }))} />
             <div>
               <label className="label">Duration</label>
               <select className="select" value={form.duration} onChange={e => setForm(p => ({ ...p, duration: e.target.value }))}>
                 <option value="full">Full day</option>
                 <option value="half">Half day</option>
               </select>
-              <p className="xsmall muted" style={{ marginTop: 6 }}>
-                Selected request: {calculateLeaveDays(form)} day(s). Weekends are not deducted.
-              </p>
-            </div>
-
-            <div>
-              <label className="label">Reason / Notes</label>
-              <textarea className="textarea" value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} />
-            </div>
-
-            <button className="btn" onClick={submit}>Submit Annual Leave</button>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-content">
-            <div className="flex justify-between items-center" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                <h2>Annual Leave Calendar</h2>
-                <p className="small muted">Calendar starts Monday. Approved AL deducts from top card balance.</p>
-              </div>
-              <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ maxWidth: 180 }} />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6 }}>
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <b key={d} className="small muted" style={{ textAlign: 'center' }}>{d}</b>)}
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
-              {blanks.map((_, i) => <div key={`blank-${i}`} />)}
-              {days.map(day => {
-                const items = requestsForDate(day);
-                const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-                return (
-                  <div key={day.toISOString()} style={{ minHeight: 90, background: isWeekend ? '#f1f5f9' : '#f8fafc', borderRadius: 12, padding: 8 }}>
-                    <b>{day.getDate()}</b>
-                    <div className="space-y-sm" style={{ marginTop: 6 }}>
-                      {items.slice(0, 2).map(item => (
-                        <div key={item.id} className={`badge ${item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
-                          {item.employeeName} · {item.duration === 'half' ? '½' : 'AL'} · {item.status}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>
+
+          <div>
+            <label className="label">Reason / Notes</label>
+            <textarea className="textarea" value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} />
+          </div>
+
+          <div className="card-dark" style={{ padding: 16 }}>
+            <p className="small">Selected AL Days</p>
+            <h2>{calculateLeaveDays(form)} day(s)</h2>
+            <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Approved requests deduct from top card balance.</p>
+          </div>
+
+          <button className="btn" onClick={submit}>Submit Annual Leave</button>
         </div>
       </div>
 
       <div className="card">
         <div className="card-content">
           <h2>Annual Leave Requests</h2>
+
           {visibleRequests.length === 0 ? (
             <p className="muted">No annual leave requests yet.</p>
           ) : (
