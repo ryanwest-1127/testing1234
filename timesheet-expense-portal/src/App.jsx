@@ -269,6 +269,8 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours) {
     totalWorkingHours,
     targetHours,
     timeInLieuRemaining,
+    totalExpenseClaims,
+    approvedPaidExpenses,
     outstandingExpenses,
     pendingApproval,
     annualLeaveRemaining: 28,
@@ -353,6 +355,11 @@ export default function App() {
   () => calculateTotals(timesheet, expenses, timeInLieu, standardHours),
   [timesheet, expenses, timeInLieu, standardHours]
 );
+
+  const currentExpenseTotal = useMemo(
+    () => expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0),
+    [expenses]
+  );
 
   const dashboardSummary = useMemo(
     () => getDashboardSummary(claims, selectedWeek, weeklyStandardHours),
@@ -448,7 +455,7 @@ export default function App() {
     ...commonClaimFields(status),
     type: 'expense',
     expenses,
-    totals: { totalExpense: totals.totalExpense }
+    totals: { totalExpense: currentExpenseTotal }
   });
 
   const saveDraft = () => {
@@ -623,9 +630,9 @@ export default function App() {
             icon={<FileCheck2 />}
           />
           <Metric
-            label="Outstanding Expenses"
-            value={money(dashboardSummary.outstandingExpenses)}
-            sub="Unpaid balance"
+            label="Total Expense"
+            value={money(dashboardSummary.outstandingExpenses + currentExpenseTotal)}
+            sub={currentExpenseTotal ? `Unapproved + current form ${money(currentExpenseTotal)}` : 'Unapproved / unpaid claims'}
             icon={<ReceiptText />}
           />
           <Metric
@@ -799,7 +806,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
           <div>
             <h2>Detailed Report</h2>
             <p className="small muted">
-              Weekly hours, cumulative TIL, weekly TIL, outstanding expenses and daily hours against the 7.5h standard.
+              Weekly hours, cumulative TIL, weekly TIL, total expense and daily hours against the 7.5h standard.
             </p>
           </div>
 
@@ -856,9 +863,9 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         />
 
         <Insight
-          title="Outstanding Expenses"
+          title="Total Expense"
           value={money(totalExpenses)}
-          note={`Claimed ${money(totalExpenseClaims)} - paid ${money(approvedPaidExpenses)}`}
+          note={`All claims ${money(totalExpenseClaims)} - approved/paid ${money(approvedPaidExpenses)}`}
           icon={<WalletCards />}
         />
       </div>
@@ -1302,14 +1309,16 @@ function TimesheetForm(p) {
 
 
 function ExpenseForm(p) {
+  const currentExpenseTotal = p.expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
   return (
     <div className="space-y">
       <div className="card">
         <div className="card-content grid grid-4">
           <Mini label="Employee" value={p.employeeInfo.employeeName} />
           <Mini label="Week" value={weekLabel(p.selectedWeek)} />
-          <Mini label="Timesheet Hours" value={`${p.totals.totalWorkingHours.toFixed(2)} hrs`} />
-          <Mini label="Expense Total" value={money(p.totals.totalExpense)} />
+          <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
+          <Mini label="Status" value="Draft input" />
         </div>
       </div>
 
@@ -1323,6 +1332,12 @@ function ExpenseForm(p) {
             <button className="btn secondary" onClick={() => p.setExpenses(prev => [...prev, makeExpense()])}>
               <Plus size={16} /> Add Expense
             </button>
+          </div>
+
+          <div className="card-dark" style={{ padding: 16 }}>
+            <p className="small">Current Expense Total</p>
+            <h2>{money(currentExpenseTotal)}</h2>
+            <p className="xsmall" style={{ color: '#cbd5e1' }}>This total updates while you type and will be added to Total Expense when submitted.</p>
           </div>
 
           {p.expenses.map((e, i) => (
