@@ -849,13 +849,8 @@ function BusinessWeekPicker({ value, onChange }) {
     return start.getMonth();
   });
 
-  const selectedWeekDates = getWeekDates(value);
-  const monthStart = new Date(viewYear, viewMonth, 1);
-  const monthEnd = new Date(viewYear, viewMonth + 1, 0);
-  const firstDay = monthStart.getDay() || 7;
-  const blanks = Array.from({ length: firstDay - 1 });
-  const monthDays = Array.from({ length: monthEnd.getDate() }, (_, i) => new Date(viewYear, viewMonth, i + 1));
   const currentYear = new Date().getFullYear();
+  const weeksInYear = getWeeksInBusinessYear(viewYear);
 
   const monthNames = Array.from({ length: 12 }, (_, i) =>
     new Date(viewYear, i, 1).toLocaleDateString('en-GB', { month: 'long' })
@@ -867,31 +862,41 @@ function BusinessWeekPicker({ value, onChange }) {
     return Math.floor(diffDays / 7) + 1;
   };
 
-  const getMondayForCalendarRow = (rowIndex) => {
-    const monday = new Date(monthStart);
-    monday.setDate(monthStart.getDate() - (firstDay - 1) + rowIndex * 7);
-    return monday;
+  const pickWeek = (targetYear, targetWeek) => {
+    const safeWeek = Math.max(1, Math.min(Number(targetWeek), getWeeksInBusinessYear(targetYear)));
+    const nextValue = makeWeekValue(targetYear, safeWeek);
+    const nextStart = getBusinessWeekStart(nextValue);
+    setViewYear(targetYear);
+    setViewMonth(nextStart.getMonth());
+    onChange(nextValue);
   };
 
-  const selectedDateKeys = new Set(
-    selectedWeekDates
-      .filter(d => d.inYear)
-      .map(d => d.date.toISOString().slice(0, 10))
-  );
+  const getWeeksForMonth = () => {
+    const start = new Date(viewYear, viewMonth, 1);
+    const end = new Date(viewYear, viewMonth + 1, 0);
+    const firstWeek = getWeekFromDate(start);
+    const lastWeek = getWeekFromDate(end);
 
-  const pickDate = (date) => {
-    const nextWeek = getWeekFromDate(date);
-    onChange(makeWeekValue(date.getFullYear(), nextWeek));
-    setOpen(false);
+    const weeks = [];
+    for (let w = firstWeek; w <= lastWeek; w += 1) {
+      weeks.push(w);
+    }
+    return weeks;
   };
 
-  const calendarCells = [...blanks.map(() => null), ...monthDays];
-  const rows = [];
-  for (let i = 0; i < calendarCells.length; i += 7) {
-    const row = calendarCells.slice(i, i + 7);
-    while (row.length < 7) row.push(null);
-    rows.push(row);
-  }
+  const weeksForMonth = getWeeksForMonth();
+
+  const formatDay = (date) => String(date.getDate()).padStart(2, '0');
+
+  const buildWeekRow = (weekNumber) => {
+    const weekValue = makeWeekValue(viewYear, weekNumber);
+    const dates = getWeekDates(weekValue);
+
+    return {
+      weekNumber,
+      dates
+    };
+  };
 
   return (
     <div style={{ position: 'relative' }}>
@@ -913,7 +918,7 @@ function BusinessWeekPicker({ value, onChange }) {
             top: '100%',
             right: 0,
             marginTop: 8,
-            width: 430,
+            width: 500,
             boxShadow: '0 24px 60px rgba(15,23,42,.18)'
           }}
         >
@@ -924,7 +929,11 @@ function BusinessWeekPicker({ value, onChange }) {
                 <select
                   className="select"
                   value={viewYear}
-                  onChange={e => setViewYear(Number(e.target.value))}
+                  onChange={e => {
+                    const nextYear = Number(e.target.value);
+                    const nextWeek = Math.min(week, getWeeksInBusinessYear(nextYear));
+                    pickWeek(nextYear, nextWeek);
+                  }}
                 >
                   {[currentYear - 1, currentYear, currentYear + 1].map(y => (
                     <option key={y} value={y}>{y}</option>
@@ -950,14 +959,9 @@ function BusinessWeekPicker({ value, onChange }) {
                 <select
                   className="select"
                   value={week}
-                  onChange={e => {
-                    const nextValue = makeWeekValue(viewYear, Number(e.target.value));
-                    const nextStart = getBusinessWeekStart(nextValue);
-                    setViewMonth(nextStart.getMonth());
-                    onChange(nextValue);
-                  }}
+                  onChange={e => pickWeek(viewYear, Number(e.target.value))}
                 >
-                  {Array.from({ length: getWeeksInBusinessYear(viewYear) }, (_, i) => i + 1).map(w => (
+                  {Array.from({ length: weeksInYear }, (_, i) => i + 1).map(w => (
                     <option key={w} value={w}>Week {w}</option>
                   ))}
                 </select>
@@ -966,7 +970,8 @@ function BusinessWeekPicker({ value, onChange }) {
 
             <div
               style={{
-                gridTemplateColumns: '58px repeat(7, 1fr)',
+                display: 'grid',
+                gridTemplateColumns: '64px repeat(7, 1fr)',
                 gap: 6,
                 textAlign: 'center',
                 alignItems: 'center'
@@ -977,68 +982,53 @@ function BusinessWeekPicker({ value, onChange }) {
                 <b key={`${d}-${i}`} className="xsmall muted">{d}</b>
               ))}
 
-              {rows.map((row, rowIndex) => {
-                const rowMonday = getMondayForCalendarRow(rowIndex);
-                const rowWeekNumber = getWeekFromDate(rowMonday);
-                const rowYear = rowMonday.getFullYear();
-                const isSelectedWeekRow = rowWeekNumber === week && rowYear === year;
+              {weeksForMonth.map(weekNumber => {
+                const row = buildWeekRow(weekNumber);
+                const isSelectedWeek = viewYear === year && weekNumber === week;
 
                 return (
-                  <React.Fragment key={`week-row-${rowIndex}`}>
+                  <React.Fragment key={`week-row-${weekNumber}`}>
                     <button
                       type="button"
-                      className="xsmall muted"
-                      onClick={() => {
-                        const targetWeek = Math.max(1, Math.min(rowWeekNumber, getWeeksInBusinessYear(rowYear)));
-                        const nextValue = makeWeekValue(rowYear, targetWeek);
-                        const nextStart = getBusinessWeekStart(nextValue);
-                        setViewYear(rowYear);
-                        setViewMonth(nextStart.getMonth());
-                        onChange(nextValue);
-                      }}
+                      onClick={() => pickWeek(viewYear, weekNumber)}
                       style={{
-                        border: '1px solid ' + (isSelectedWeekRow ? '#2563eb' : '#e2e8f0'),
-                        background: isSelectedWeekRow ? '#dbeafe' : '#f8fafc',
+                        border: '1px solid ' + (isSelectedWeek ? '#2563eb' : '#e2e8f0'),
+                        background: isSelectedWeek ? '#dbeafe' : '#f8fafc',
                         borderRadius: 10,
                         minHeight: 44,
                         cursor: 'pointer',
                         fontWeight: 700
                       }}
                     >
-                      {rowWeekNumber ? `W${rowWeekNumber}` : ''}
+                      {weekNumber}
                     </button>
 
-                    {Array.from({ length: 7 }, (_, dayIndex) => {
-                      const day = row[dayIndex] || null;
-                      if (!day) {
-                        return (
-                          <div
-                            key={`empty-${rowIndex}-${dayIndex}`}
-                            style={{ minHeight: 44 }}
-                          />
-                        );
-                      }
-
-                      const key = day.toISOString().slice(0, 10);
-                      const isSelected = selectedDateKeys.has(key);
+                    {row.dates.map(({ date, inYear }, dayIndex) => {
+                      const isCurrentMonth = inYear && date.getMonth() === viewMonth;
+                      const isSelected = isSelectedWeek;
+                      const isWeekend = dayIndex >= 5;
 
                       return (
                         <button
                           type="button"
-                          key={key}
-                          onClick={() => pickDate(day)}
-                          title={`Week ${getWeekFromDate(day)}`}
+                          key={`${weekNumber}-${dayIndex}`}
+                          onClick={() => pickWeek(viewYear, weekNumber)}
                           style={{
                             border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
-                            background: isSelected ? '#dbeafe' : '#fff',
-                            color: '#0f172a',
+                            background: isSelected
+                              ? '#dbeafe'
+                              : isCurrentMonth
+                                ? '#ffffff'
+                                : '#f1f5f9',
+                            color: isCurrentMonth ? '#0f172a' : '#94a3b8',
                             borderRadius: 10,
                             minHeight: 44,
                             cursor: 'pointer',
-                            fontWeight: isSelected ? 700 : 500
+                            fontWeight: isSelected ? 700 : 500,
+                            opacity: isWeekend ? 0.85 : 1
                           }}
                         >
-                          {day.getDate()}
+                          {inYear ? formatDay(date) : '—'}
                         </button>
                       );
                     })}
@@ -1048,7 +1038,7 @@ function BusinessWeekPicker({ value, onChange }) {
             </div>
 
             <div className="xsmall muted">
-              Week 1 starts from 1 January. Final week stays in December and may be shorter.
+              One row equals one week. Week 1 starts from 1 January. Final week stays in December and may be shorter.
             </div>
           </div>
         </div>
