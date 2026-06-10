@@ -767,15 +767,27 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
   const weekDateLabels = getWeekDates(selectedWeekOnly);
 
   const dailyHoursData = weekDays.map((day, index) => {
-    const totalWorked = weekOnlyTimesheetClaims.reduce((sum, claim) => {
+    const projectHours = weekOnlyTimesheetClaims.reduce((sum, claim) => {
       const row = claim.timesheet?.[day] || {};
-      return sum + Number(row.projectHours || 0) + Number(row.travelHours || 0);
+      return sum + Number(row.projectHours || 0);
     }, 0);
+
+    const travelHours = weekOnlyTimesheetClaims.reduce((sum, claim) => {
+      const row = claim.timesheet?.[day] || {};
+      return sum + Number(row.travelHours || 0);
+    }, 0);
+
+    const totalWorked = projectHours + travelHours;
+    const standardProject = Math.min(projectHours, dailyStandardHours);
+    const remainingStandardAfterProject = Math.max(0, dailyStandardHours - standardProject);
+    const standardTravel = Math.min(travelHours, remainingStandardAfterProject);
+    const timeInLieu = Math.max(0, totalWorked - dailyStandardHours);
 
     return {
       day: `${day.slice(0, 3)} ${weekDateLabels[index]?.label || ''}`,
-      standard: Math.min(totalWorked, dailyStandardHours),
-      timeInLieu: Math.max(0, totalWorked - dailyStandardHours),
+      project: standardProject,
+      travel: standardTravel,
+      timeInLieu,
       total: totalWorked
     };
   });
@@ -851,7 +863,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         />
       </div>
 
-      <ChartCard title="Daily Hours vs 7.5h Standard" sub="Blue = standard hours, red = Time in Lieu over 7.5h">
+      <ChartCard title="Daily Hours Breakdown vs 7.5h Standard" sub="Project / Workshop and Travel are shown separately. Red = Time in Lieu over 7.5h.">
         {dailyHoursData.every(item => item.total === 0) ? (
           <div className="muted" style={{ padding: 24 }}>No timesheet data for this week yet.</div>
         ) : (
@@ -863,18 +875,24 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
               <Tooltip
                 formatter={(value, name) => [
                   `${Number(value || 0).toFixed(2)} hrs`,
-                  name === 'standard' ? 'Standard hours' : 'Time in Lieu'
+                  name === 'project'
+                    ? 'Project / Workshop'
+                    : name === 'travel'
+                      ? 'Travel'
+                      : 'Time in Lieu'
                 ]}
                 labelFormatter={(label) => `${label}`}
               />
-              <Bar dataKey="standard" stackId="hours" fill="#2563eb" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="project" stackId="hours" fill="#2563eb" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="travel" stackId="hours" fill="#16a34a" radius={[6, 6, 0, 0]} />
               <Bar dataKey="timeInLieu" stackId="hours" fill="#dc2626" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
 
         <div className="flex gap items-center" style={{ marginTop: 12, flexWrap: 'wrap' }}>
-          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#2563eb', borderRadius: 3, marginRight: 6 }} />Standard hours up to 7.5h</span>
+          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#2563eb', borderRadius: 3, marginRight: 6 }} />Project / Workshop</span>
+          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#16a34a', borderRadius: 3, marginRight: 6 }} />Travel</span>
           <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#dc2626', borderRadius: 3, marginRight: 6 }} />Time in Lieu over 7.5h</span>
         </div>
       </ChartCard>
