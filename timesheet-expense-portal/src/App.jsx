@@ -888,7 +888,9 @@ function BusinessWeekPicker({ value, onChange }) {
   const calendarCells = [...blanks.map(() => null), ...monthDays];
   const rows = [];
   for (let i = 0; i < calendarCells.length; i += 7) {
-    rows.push(calendarCells.slice(i, i + 7));
+    const row = calendarCells.slice(i, i + 7);
+    while (row.length < 7) row.push(null);
+    rows.push(row);
   }
 
   return (
@@ -1008,7 +1010,14 @@ function BusinessWeekPicker({ value, onChange }) {
 
                     {Array.from({ length: 7 }, (_, dayIndex) => {
                       const day = row[dayIndex] || null;
-                      if (!day) return <div key={`empty-${rowIndex}-${dayIndex}`} />;
+                      if (!day) {
+                        return (
+                          <div
+                            key={`empty-${rowIndex}-${dayIndex}`}
+                            style={{ minHeight: 44 }}
+                          />
+                        );
+                      }
 
                       const key = day.toISOString().slice(0, 10);
                       const isSelected = selectedDateKeys.has(key);
