@@ -327,6 +327,7 @@ export default function App() {
   const [weeklyStandardHours, setWeeklyStandardHours] = useState('37.5');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('All');
   const [receipt, setReceipt] = useState(null);
   const [editingClaimId, setEditingClaimId] = useState(null);
   const [editingOriginalClaim, setEditingOriginalClaim] = useState(null);
@@ -371,10 +372,15 @@ export default function App() {
       ? claims
       : claims.filter(c => c.employeeId === employeeInfo.employeeId);
 
-  const filteredClaims = visibleClaims.filter(c =>
-    (!search || `${c.employeeName} ${c.email} ${c.week}`.toLowerCase().includes(search.toLowerCase())) &&
-    (statusFilter === 'All' || c.status === statusFilter)
-  );
+  const filteredClaims = visibleClaims.filter(c => {
+    const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
+
+    return (
+      (!search || `${c.employeeName} ${c.email} ${c.week}`.toLowerCase().includes(search.toLowerCase())) &&
+      (statusFilter === 'All' || c.status === statusFilter) &&
+      (historyTypeFilter === 'All' || claimType === historyTypeFilter)
+    );
+  });
 
   const categoryMap = {};
   visibleClaims
@@ -708,7 +714,7 @@ export default function App() {
 
         {tab === 'history' && (
           <>
-            <Filter {...{ search, setSearch, statusFilter, setStatusFilter, setClaims }} />
+            <Filter {...{ search, setSearch, statusFilter, setStatusFilter, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
             <ClaimList claims={filteredClaims} setReceipt={setReceipt} startEditClaim={startEditClaim} activeUser={activeUser} />
           </>
         )}
@@ -717,7 +723,7 @@ export default function App() {
           activeUser.role !== 'Manager'
             ? <div className="card"><div className="card-content muted">Switch to Manager demo user to approve claims.</div></div>
             : <>
-                <Filter {...{ search, setSearch, statusFilter, setStatusFilter, setClaims }} />
+                <Filter {...{ search, setSearch, statusFilter, setStatusFilter, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
                 <ClaimList claims={filteredClaims} setReceipt={setReceipt} manager updateClaim={updateClaim} startEditClaim={startEditClaim} activeUser={activeUser} />
               </>
         )}
@@ -1439,7 +1445,7 @@ function ReadOnlyField({ label, value }) {
   );
 }
 
-function Filter({ search, setSearch, statusFilter, setStatusFilter, setClaims }) {
+function Filter({ search, setSearch, statusFilter, setStatusFilter, historyTypeFilter, setHistoryTypeFilter, setClaims }) {
   return (
     <div className="card">
       <div className="card-content flex gap" style={{ flexWrap: 'wrap' }}>
@@ -1471,86 +1477,144 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
 
   return (
     <div className="space-y-sm">
-      {claims.map(c => (
-        <div className="card" key={c.id}>
-          <div className="card-content">
-            <div className="flex justify-between gap" style={{ flexWrap: 'wrap' }}>
-              <div>
-                <h3>
-                  {c.employeeName} — {c.weekLabel || c.week}
+      {claims.map(c => {
+        const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
+        const isExpense = claimType === 'expense';
+
+        return (
+          <div className="card" key={c.id}>
+            <div className="card-content">
+              <div className="flex justify-between gap" style={{ flexWrap: 'wrap' }}>
+                <div>
+                  <h3>
+                    {c.employeeName} — {c.weekLabel || c.week}
+                    {' '}
+                    <span className="badge">{isExpense ? 'Expense' : 'Timesheet'}</span>
+                    {' '}
+                    <span className={`badge ${c.status}`}>{c.status}</span>
+                  </h3>
+                  <p className="small muted">
+                    {c.email} • {c.department} {c.submittedAt ? `• Submitted ${c.submittedAt}` : ''}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="small muted">{isExpense ? 'Expense Total' : 'Working Hours'}</p>
+                  <h2>{isExpense ? money(c.totals?.totalExpense) : `${c.totals?.totalWorkingHours?.toFixed?.(2) || '0.00'} hrs`}</h2>
+                </div>
+              </div>
+
+              {isExpense ? (
+                <>
+                  <div className="grid grid-4">
+                    <Mini label="Expense Total" value={money(c.totals?.totalExpense)} />
+                    <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
+                    <Mini label="Items" value={String(c.expenses?.length || 0)} />
+                    <Mini label="Status" value={c.status} />
+                  </div>
+
+                  <div className="wide">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Category</th>
+                          <th>Description</th>
+                          <th>Amount</th>
+                          <th>Proof</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {c.expenses?.map(e => (
+                          <tr key={e.id}>
+                            <td>{e.date || '—'}</td>
+                            <td>{e.category}</td>
+                            <td>{e.description || '—'}</td>
+                            <td><b>{money(e.amount)}</b></td>
+                            <td>
+                              {e.receiptName
+                                ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
+                                : 'Missing'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-4">
+                    <Mini label="Working Hours" value={`${c.totals?.totalWorkingHours?.toFixed?.(2) || '0.00'} hrs`} />
+                    <Mini label="Project / Workshop" value={`${c.totals?.projectHours?.toFixed?.(2) || '0.00'} hrs`} />
+                    <Mini label="Travel Hours" value={`${c.totals?.travelHours?.toFixed?.(2) || '0.00'} hrs`} />
+                    <Mini label="TIL Balance" value={`${c.totals?.tilBalance?.toFixed?.(2) || '0.00'} hrs`} />
+                  </div>
+
+                  <div className="wide">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Day</th>
+                          <th>Project / Job</th>
+                          <th>Project / Workshop</th>
+                          <th>Travel</th>
+                          <th>Take back TIL</th>
+                          <th>Holiday</th>
+                          <th>Sickness</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {weekDays.map(day => {
+                          const row = c.timesheet?.[day] || {};
+                          return (
+                            <tr key={day}>
+                              <td><b>{day}</b></td>
+                              <td>{row.projectName || '—'}</td>
+                              <td>{Number(row.projectHours || 0).toFixed(2)}</td>
+                              <td>{Number(row.travelHours || 0).toFixed(2)}</td>
+                              <td>{Number(row.takeBackTimeInLieu || 0).toFixed(2)}</td>
+                              <td>{row.holidayType === 'full' ? 'Full day' : row.holidayType === 'half' ? 'Half day' : '—'}</td>
+                              <td>{row.sickness ? 'Sick' : '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
+              {!manager && startEditClaim && (
+                <div style={{ marginTop: 16 }}>
+                  <button className="btn secondary" onClick={() => startEditClaim(c)}>Edit submitted data</button>
+                </div>
+              )}
+
+              {manager && (
+                <div className="space-y-sm" style={{ background: '#f8fafc', padding: 16, borderRadius: 20, marginTop: 16 }}>
+                  <label className="label">Manager Note</label>
+                  <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />
+
+                  <button className="btn" onClick={() => updateClaim(c.id, { status: 'Approved' })}>
+                    <CheckCircle2 size={16} /> Approve
+                  </button>
                   {' '}
-                  <span className={`badge ${c.status}`}>{c.status}</span>
-                </h3>
-                <p className="small muted">
-                  {c.email} • {c.department} {c.submittedAt ? `• Submitted ${c.submittedAt}` : ''}
-                </p>
-              </div>
-
-              <div>
-                <p className="small muted">Expense Total</p>
-                <h2>{money(c.totals?.totalExpense)}</h2>
-              </div>
+                  <button className="btn danger" onClick={() => updateClaim(c.id, { status: 'Rejected' })}>
+                    <XCircle size={16} /> Reject
+                  </button>
+                  {' '}
+                  <button className="btn secondary" onClick={() => updateClaim(c.id, { status: 'Paid' })}>
+                    Mark as Paid
+                  </button>
+                </div>
+              )}
             </div>
-
-            <div className="grid grid-4">
-              <Mini label="Working Hours" value={`${c.totals?.totalWorkingHours?.toFixed?.(2) || '0.00'} hrs`} />
-              <Mini label="Travel Hours" value={`${c.totals?.travelHours?.toFixed?.(2) || '0.00'} hrs`} />
-              <Mini label="TIL C/F" value={`${c.totals?.tilBalance?.toFixed?.(2) || '0.00'} hrs`} />
-              <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
-            </div>
-
-            <div className="wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Category</th>
-                    <th>Description</th>
-                    <th>Amount</th>
-                    <th>Proof</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {c.expenses?.map(e => (
-                    <tr key={e.id}>
-                      <td>{e.date || '—'}</td>
-                      <td>{e.category}</td>
-                      <td>{e.description || '—'}</td>
-                      <td><b>{money(e.amount)}</b></td>
-                      <td>
-                        {e.receiptName
-                          ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
-                          : 'Missing'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {!manager && startEditClaim && <div style={{marginTop:16}}><button className="btn secondary" onClick={() => startEditClaim(c)}>Edit submitted data</button></div>}
-            {manager && (
-              <div className="space-y-sm" style={{ background: '#f8fafc', padding: 16, borderRadius: 20, marginTop: 16 }}>
-                <label className="label">Manager Note</label>
-                <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />
-
-                <button className="btn" onClick={() => updateClaim(c.id, { status: 'Approved' })}>
-                  <CheckCircle2 size={16} /> Approve
-                </button>
-                {' '}
-                <button className="btn danger" onClick={() => updateClaim(c.id, { status: 'Rejected' })}>
-                  <XCircle size={16} /> Reject
-                </button>
-                {' '}
-                <button className="btn secondary" onClick={() => updateClaim(c.id, { status: 'Paid' })}>
-                  Mark as Paid
-                </button>
-              </div>
-            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
