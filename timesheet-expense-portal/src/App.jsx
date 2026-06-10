@@ -230,38 +230,7 @@ function calculateTotals(timesheet, expenses, til, standardHours) {
 
 
 
-
-function getDatesBetween(startDate, endDate) {
-  if (!startDate || !endDate) return [];
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
-
-  const dates = [];
-  const d = new Date(start);
-  while (d <= end) {
-    dates.push(new Date(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return dates;
-}
-
-function calculateLeaveDays(request) {
-  const dates = getDatesBetween(request.startDate, request.endDate);
-  const workingDates = dates.filter(d => {
-    const day = d.getDay();
-    return day !== 0 && day !== 6;
-  });
-  return workingDates.length * (request.duration === 'half' ? 0.5 : 1);
-}
-
-function calculateApprovedLeaveDays(requests) {
-  return requests
-    .filter(r => r.status === 'Approved')
-    .reduce((sum, r) => sum + calculateLeaveDays(r), 0);
-}
-
-function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
+function getDashboardSummary(claims, selectedWeek, weeklyStandardHours) {
   const timesheetClaims = claims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
   const expenseClaims = claims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
 
@@ -304,7 +273,7 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
     approvedPaidExpenses,
     outstandingExpenses,
     pendingApproval,
-    annualLeaveRemaining: Math.max(0, 28 - calculateApprovedLeaveDays(leaveRequests)),
+    annualLeaveRemaining: 28,
     annualLeaveTotal: 28
   };
 }
@@ -335,7 +304,6 @@ function sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek) {
 function tabLabel(tab) {
   if (tab === 'timesheet') return 'Timesheet';
   if (tab === 'expense') return 'Expense';
-  if (tab === 'annualLeave') return 'Annual Leave';
   return tab[0].toUpperCase() + tab.slice(1);
 }
 
@@ -343,9 +311,6 @@ export default function App() {
   const [tab, setTab] = useState('dashboard');
   const [activeUser, setActiveUser] = useState(employees[0]);
   const [claims, setClaims] = useState([]);
-  const [leaveRequests, setLeaveRequests] = useState([]);
-  const [alForm, setAlForm] = useState({ startDate: '', endDate: '', duration: 'full', reason: '' });
-  const [alError, setAlError] = useState('');
   const [selectedWeek, setSelectedWeek] = useState('2026-W21');
 
   const [employeeInfo, setEmployeeInfo] = useState({
@@ -368,15 +333,13 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      setClaims(saved.claims || []);
-      setLeaveRequests(saved.leaveRequests || []);
+      setClaims(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').claims || []);
     } catch {}
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ claims, leaveRequests }));
-  }, [claims, leaveRequests]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ claims }));
+  }, [claims]);
 
   useEffect(() => {
     const user = activeUser.role === 'Manager' ? employees[0] : activeUser;
@@ -399,8 +362,8 @@ export default function App() {
   );
 
   const dashboardSummary = useMemo(
-    () => getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests),
-    [claims, selectedWeek, weeklyStandardHours, leaveRequests]
+    () => getDashboardSummary(claims, selectedWeek, weeklyStandardHours),
+    [claims, selectedWeek, weeklyStandardHours]
   );
 
   const visibleClaims =
@@ -411,83 +374,7 @@ export default function App() {
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
 
-  
-  const submitLeaveRequest = (request) => {
-    const newRequest = {
-      id: crypto.randomUUID(),
-      employeeId: activeUser.id,
-      employeeName: activeUser.name,
-      status: 'Submitted',
-      submittedAt: new Date().toLocaleString('en-GB'),
-      ...request
-    };
-    setLeaveRequests(prev => [newRequest, ...prev]);
-  };
-
-  const updateLeaveRequest = (id, patch) => {
-    setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
-  };
-
-
-  const visibleLeaveRequests = activeUser.role === 'Manager'
-    ? leaveRequests
-    : leaveRequests.filter(r => r.employeeId === activeUser.id);
-
-  const approvedLeaveUsed = calculateApprovedLeaveDays(
-    activeUser.role === 'Manager'
-      ? leaveRequests
-      : leaveRequests.filter(r => r.employeeId === activeUser.id)
-  );
-
-  const annualLeaveTotal = 28;
-  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedLeaveUsed);
-
-  const leaveRequestDateKeys = (request) =>
-    getDatesBetween(request.startDate, request.endDate)
-      .filter(d => {
-        const day = d.getDay();
-        return day !== 0 && day !== 6;
-      })
-      .map(d => d.toISOString().slice(0, 10));
-
-  const hasOverlappingLeave = (candidate) => {
-    const candidateKeys = new Set(leaveRequestDateKeys(candidate));
-
-    return leaveRequests.some(existing => {
-      if (existing.employeeId !== activeUser.id) return false;
-      if (existing.status === 'Rejected') return false;
-      return leaveRequestDateKeys(existing).some(key => candidateKeys.has(key));
-    });
-  };
-
-  const submitAnnualLeave = () => {
-    setAlError('');
-
-    if (!alForm.startDate || !alForm.endDate) {
-      setAlError('Please select start date and end date.');
-      return;
-    }
-
-    if (new Date(alForm.endDate) < new Date(alForm.startDate)) {
-      setAlError('End date cannot be before start date.');
-      return;
-    }
-
-    if (calculateLeaveDays(alForm) <= 0) {
-      setAlError('Annual leave must include at least one weekday.');
-      return;
-    }
-
-    if (hasOverlappingLeave(alForm)) {
-      setAlError('This employee already has an AL request on one or more selected dates.');
-      return;
-    }
-
-    submitLeaveRequest(alForm);
-    setAlForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
-  };
-
-  return (
+    return (
       (!search || `${c.employeeName} ${c.email} ${c.week}`.toLowerCase().includes(search.toLowerCase())) &&
       (historyTypeFilter === 'All' || claimType === historyTypeFilter)
     );
@@ -762,7 +649,7 @@ export default function App() {
 
         <div className="tabs">
           <button className="btn danger" onClick={resetDemoData}>Reset Demo Data</button>
-          {['dashboard', 'timesheet', 'expense', 'annualLeave', 'history', 'manager'].map(t => (
+          {['dashboard', 'timesheet', 'expense', 'history', 'manager'].map(t => (
             <button
               className={`tab ${tab === t ? 'active' : ''}`}
               onClick={() => setTab(t)}
@@ -821,107 +708,6 @@ export default function App() {
               submitExpense
             }}
           />
-        )}
-
-
-        {tab === 'annualLeave' && (
-          <div className="space-y">
-            <div className="card">
-              <div className="card-content">
-                <h2>Annual Leave</h2>
-                <p className="small muted">Apply annual leave here. Approved AL will deduct from the top card Annual Leave Remaining.</p>
-              </div>
-            </div>
-
-            <div className="grid grid-3">
-              <Insight title="Annual Leave Remaining" value={`${annualLeaveRemaining} / ${annualLeaveTotal} days`} note="Approved AL deducted" icon={<CalendarDays />} />
-              <Insight title="Pending AL" value={String(visibleLeaveRequests.filter(r => r.status === 'Submitted').length)} note="Waiting for approval" icon={<Clock />} />
-              <Insight title="Approved AL Used" value={`${approvedLeaveUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
-            </div>
-
-            <div className="card">
-              <div className="card-content space-y-sm">
-                <h2>Apply Annual Leave</h2>
-
-                {alError && (
-                  <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>
-                    {alError}
-                  </div>
-                )}
-
-                <div className="grid grid-3">
-                  <Field label="Start Date" type="date" value={alForm.startDate} onChange={v => setAlForm(p => ({ ...p, startDate: v }))} />
-                  <Field label="End Date" type="date" value={alForm.endDate} onChange={v => setAlForm(p => ({ ...p, endDate: v }))} />
-
-                  <div>
-                    <label className="label">Duration</label>
-                    <select className="select" value={alForm.duration} onChange={e => setAlForm(p => ({ ...p, duration: e.target.value }))}>
-                      <option value="full">Full day</option>
-                      <option value="half">Half day</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="label">Reason / Notes</label>
-                  <textarea className="textarea" value={alForm.reason} onChange={e => setAlForm(p => ({ ...p, reason: e.target.value }))} />
-                </div>
-
-                <div className="card-dark" style={{ padding: 16 }}>
-                  <p className="small">Selected AL Days</p>
-                  <h2>{calculateLeaveDays(alForm)} day(s)</h2>
-                  <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Submitted requests do not deduct until approved.</p>
-                </div>
-
-                <button className="btn" onClick={submitAnnualLeave}>Submit Annual Leave</button>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="card-content">
-                <h2>Annual Leave Requests</h2>
-
-                {visibleLeaveRequests.length === 0 ? (
-                  <p className="muted">No annual leave requests yet.</p>
-                ) : (
-                  <div className="wide">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Employee</th>
-                          <th>Dates</th>
-                          <th>Duration</th>
-                          <th>Days</th>
-                          <th>Status</th>
-                          <th>Reason</th>
-                          {activeUser.role === 'Manager' && <th>Action</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleLeaveRequests.map(r => (
-                          <tr key={r.id}>
-                            <td>{r.employeeName}</td>
-                            <td>{r.startDate} → {r.endDate}</td>
-                            <td>{r.duration === 'half' ? 'Half day' : 'Full day'}</td>
-                            <td>{calculateLeaveDays(r)}</td>
-                            <td><span className={`badge ${r.status}`}>{r.status}</span></td>
-                            <td>{r.reason || '—'}</td>
-                            {activeUser.role === 'Manager' && (
-                              <td>
-                                <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
-                                {' '}
-                                <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
         )}
 
         {tab === 'history' && (
@@ -1657,7 +1443,6 @@ function ReadOnlyField({ label, value }) {
   );
 }
 
-
 function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }) {
   return (
     <div className="card">
@@ -1665,22 +1450,6 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
         <div className="flex items-center gap" style={{ flex: 1 }}>
           <Search size={16} />
           <input className="input" placeholder="Search employee, email or week..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-
-        <div className="flex gap" style={{ flexWrap: 'wrap' }}>
-          {[
-            { label: 'All', value: 'All' },
-            { label: 'Timesheet', value: 'timesheet' },
-            { label: 'Expense', value: 'expense' }
-          ].map(item => (
-            <button
-              key={item.value}
-              className={`btn ${historyTypeFilter === item.value ? '' : 'secondary'}`}
-              onClick={() => setHistoryTypeFilter(item.value)}
-            >
-              {item.label}
-            </button>
-          ))}
         </div>
 
         <button className="btn secondary" onClick={() => setClaims([])}>
