@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid
+  Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 import {
   Plus, Trash2, Upload, CheckCircle2, XCircle, Clock,
@@ -15,7 +14,9 @@ const STORAGE_KEY = 'timesheet-expense-saas-demo-v2';
 const employees = [
   { id: 'EMP001', name: 'Ryan Hei', email: 'ryan@example.com', role: 'Employee', department: 'Production' },
   { id: 'EMP002', name: 'Alex Chan', email: 'alex@example.com', role: 'Employee', department: 'Operations' },
-  { id: 'MGR001', name: 'Manager', email: 'manager@example.com', role: 'Manager', department: 'Management' },
+  { id: 'EMP003', name: 'Jordan Lee', email: 'jordan@example.com', role: 'Employee', department: 'Workshop' },
+  { id: 'EMP004', name: 'Sam Wong', email: 'sam@example.com', role: 'Employee', department: 'Accounts' },
+  { id: 'MGR001', name: 'Boss', email: 'boss@example.com', role: 'Manager', department: 'Management' },
 ];
 
 const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -300,15 +301,6 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
 
   const weekOptions = Array.from(new Set(cleanClaims.map(c => c.week).filter(Boolean))).sort();
   const latestSubmittedWeek = weekOptions.length ? weekOptions[weekOptions.length - 1] : selectedWeek;
-  const currentWeekLimit = selectedWeek || latestSubmittedWeek;
-
-  const isWeekOnOrBefore = (week, limit) => {
-    if (!week || !limit) return false;
-    return String(week) <= String(limit);
-  };
-
-  const cumulativeTimesheetClaims = timesheetClaims.filter(c => isWeekOnOrBefore(c.week, currentWeekLimit));
-  const cumulativeExpenseClaims = expenseClaims.filter(c => isWeekOnOrBefore(c.week, currentWeekLimit));
 
   const selectedWeekOnly = selectedWeek || latestSubmittedWeek;
   const weekOnlyTimesheetClaims = timesheetClaims.filter(c => c.week === selectedWeekOnly);
@@ -321,8 +313,8 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
     0
   );
 
-  const totalExpenseClaims = cumulativeExpenseClaims.reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
-  const approvedPaidExpenses = cumulativeExpenseClaims
+  const totalExpenseClaims = expenseClaims.reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
+  const approvedPaidExpenses = expenseClaims
     .filter(c => ['Approved', 'Paid'].includes(c.status))
     .reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
 
@@ -418,7 +410,9 @@ export default function App() {
       ? employees.find(e => e.role !== 'Manager') || activeUser
       : activeUser;
 
-    if (activeUser.role !== 'Manager') {
+    if (activeUser.role === 'Manager') {
+      setViewEmployeeId('All');
+    } else {
       setViewEmployeeId(activeUser.id);
     }
 
@@ -480,18 +474,6 @@ export default function App() {
       (historyTypeFilter === 'All' || claimType === historyTypeFilter)
     );
   });
-
-  const categoryMap = {};
-  visibleClaims
-    .filter(c => c.type === 'expense' || (!c.type && c.expenses))
-    .forEach(c =>
-      c.expenses?.forEach(e => {
-        categoryMap[e.category] = (categoryMap[e.category] || 0) + Number(e.amount || 0);
-      })
-    );
-
-  const categoryData = Object.entries(categoryMap).map(([name, value]) => ({ name, value }));
-  const pending = visibleClaims.filter(c => c.status === 'Submitted').length;
 
   const setClaimEmployee = (employeeId) => {
     const employee = employees.find(e => e.id === employeeId) || employees[0];
@@ -607,6 +589,12 @@ export default function App() {
     setTimesheet(claim.timesheet || defaultTimesheet());
     setExpenses(claim.expenses || [makeExpense()]);
     setTimeInLieu(claim.timeInLieu || { used: '0', earned: '0' });
+    setEmployeeInfo({
+      employeeId: claim.employeeId,
+      employeeName: claim.employeeName,
+      email: claim.email,
+      notes: claim.notes || ''
+    });
     if (claim.standardHours) setStandardHours(String(claim.standardHours));
     if (claim.week) setSelectedWeek(claim.week);
     setEditingClaimId(claim.id);
@@ -624,28 +612,40 @@ export default function App() {
     if (originalType === 'expense') {
       const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
       const vatTotal = expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
+      const selectedEmployee = employees.find(e => e.id === employeeInfo.employeeId);
 
       updatedClaim = {
         ...editingOriginalClaim,
+        employeeId: employeeInfo.employeeId,
+        employeeName: employeeInfo.employeeName,
+        email: employeeInfo.email,
+        department: selectedEmployee?.department || editingOriginalClaim.department || 'Production',
         week: selectedWeek,
         weekLabel: weekLabel(selectedWeek),
         expenses,
         totals: { totalExpense: expenseTotal, totalVAT: vatTotal },
+        notes: employeeInfo.notes,
         status: editingOriginalClaim.status || 'Submitted',
         editedAt: new Date().toLocaleString('en-GB')
       };
     } else {
       const cleanedTimesheet = sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek);
       const cleanedTotals = calculateTotals(cleanedTimesheet, expenses, timeInLieu, standardHours);
+      const selectedEmployee = employees.find(e => e.id === employeeInfo.employeeId);
 
       updatedClaim = {
         ...editingOriginalClaim,
+        employeeId: employeeInfo.employeeId,
+        employeeName: employeeInfo.employeeName,
+        email: employeeInfo.email,
+        department: selectedEmployee?.department || editingOriginalClaim.department || 'Production',
         week: selectedWeek,
         weekLabel: weekLabel(selectedWeek),
         timesheet: cleanedTimesheet,
         timeInLieu,
         standardHours,
         totals: cleanedTotals,
+        notes: employeeInfo.notes,
         status: editingOriginalClaim.status || 'Submitted',
         editedAt: new Date().toLocaleString('en-GB')
       };
@@ -715,15 +715,14 @@ export default function App() {
     });
   };
 
-  const visibleLeaveRequests = activeUser.role === 'Manager'
-    ? leaveRequests
-    : leaveRequests.filter(r => r.employeeId === activeUser.id);
+  const visibleLeaveRequests =
+    activeUser.role === 'Manager' && viewEmployeeId !== 'All'
+      ? leaveRequests.filter(r => r.employeeId === viewEmployeeId)
+      : activeUser.role === 'Manager'
+        ? leaveRequests
+        : leaveRequests.filter(r => r.employeeId === activeUser.id);
 
-  const approvedLeaveUsed = calculateApprovedLeaveDays(
-    activeUser.role === 'Manager'
-      ? leaveRequests
-      : leaveRequests.filter(r => r.employeeId === activeUser.id)
-  );
+  const approvedLeaveUsed = calculateApprovedLeaveDays(visibleLeaveRequests);
 
   const annualLeaveTotal = 28;
   const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedLeaveUsed);
@@ -888,8 +887,8 @@ export default function App() {
           />
           <Metric
             label="Total Expense"
-            value={money(dashboardSummary.outstandingExpenses + currentExpenseTotal)}
-            sub={currentExpenseTotal ? `Unapproved + current form ${money(currentExpenseTotal)}` : 'Unapproved / unpaid claims'}
+            value={money(dashboardSummary.outstandingExpenses)}
+            sub={`All claims ${money(dashboardSummary.totalExpenseClaims)} - approved/paid ${money(dashboardSummary.approvedPaidExpenses)}`}
             icon={<ReceiptText />}
           />
           <Metric
@@ -916,8 +915,6 @@ export default function App() {
         {tab === 'dashboard' && (
           <Dashboard
             visibleClaims={visibleClaims}
-            categoryData={categoryData}
-            totals={totals}
             weeklyStandardHours={weeklyStandardHours}
             setWeeklyStandardHours={setWeeklyStandardHours}
             activeUser={activeUser}
@@ -961,6 +958,7 @@ export default function App() {
               employees,
               activeUser,
               selectedWeek,
+              setSelectedWeek,
               totals,
               expenses,
               setExpenses,
@@ -1147,7 +1145,7 @@ export default function App() {
 
 
 
-function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, setWeeklyStandardHours, activeUser, selectedWeek }) {
+function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours, activeUser, selectedWeek }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
   const cleanVisibleClaims = uniqueClaimsByEmployeeWeekType(visibleClaims);
 
@@ -1156,16 +1154,6 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
 
   const weekOptions = Array.from(new Set(cleanVisibleClaims.map(c => c.week).filter(Boolean))).sort().reverse();
   const latestSubmittedWeek = weekOptions.length ? weekOptions[0] : selectedWeek;
-  const currentWeekLimit = dashboardWeek === 'current' ? (selectedWeek || latestSubmittedWeek) : dashboardWeek;
-
-  const isWeekOnOrBefore = (week, limit) => {
-    if (!week || !limit) return false;
-    return String(week) <= String(limit);
-  };
-
-  const cumulativeTimesheetClaims = timesheetClaims.filter(c => isWeekOnOrBefore(c.week, currentWeekLimit));
-  const cumulativeExpenseClaims = expenseClaims.filter(c => isWeekOnOrBefore(c.week, currentWeekLimit));
-
   const selectedWeekOnly = dashboardWeek === 'current' ? (selectedWeek || latestSubmittedWeek) : dashboardWeek;
   const weekOnlyTimesheetClaims = timesheetClaims.filter(c => c.week === selectedWeekOnly);
 
@@ -1175,15 +1163,13 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
     0
   );
 
-  const tilBalanceSourceClaims = dashboardWeek === 'current' ? timesheetClaims : cumulativeTimesheetClaims;
-
-  const latestTilBalance = tilBalanceSourceClaims.reduce(
+  const latestTilBalance = timesheetClaims.reduce(
     (s, c) => s + Number(c.totals?.timeInLieu || 0) - Number(c.totals?.takeBackTimeInLieu || 0),
     0
   );
 
-  const totalExpenseClaims = cumulativeExpenseClaims.reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
-  const approvedPaidExpenses = cumulativeExpenseClaims
+  const totalExpenseClaims = expenseClaims.reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
+  const approvedPaidExpenses = expenseClaims
     .filter(c => ['Approved', 'Paid'].includes(c.status))
     .reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
   const totalExpenses = Math.max(0, totalExpenseClaims - approvedPaidExpenses);
@@ -1291,7 +1277,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         <Insight
           title="Time in Lieu Remaining"
           value={`${Number(latestTilBalance || 0).toFixed(2)} hrs`}
-          note={dashboardWeek === "current" ? "All saved timesheet records" : "Cumulative to selected week"}
+          note="All saved timesheet records"
           icon={<FileCheck2 />}
         />
 
@@ -1794,7 +1780,10 @@ function ExpenseForm(p) {
               <input className="input" value={p.employeeInfo.employeeName} disabled readOnly />
             )}
           </div>
-          <Mini label="Week" value={weekLabel(p.selectedWeek)} />
+          <div>
+            <label className="label">Week</label>
+            <BusinessWeekPicker value={p.selectedWeek} onChange={p.setSelectedWeek} />
+          </div>
           <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
           <Mini label="Current VAT Total" value={money(currentVATTotal)} />
         </div>
@@ -1845,9 +1834,21 @@ function ExpenseForm(p) {
 
       <div className="card">
         <div className="card-content space-y-sm">
-          <h2>Ready to Submit Expense</h2>
-          <p className="small muted">This will submit expense only. It is no longer linked to the weekly timesheet.</p>
-          <button className="btn" onClick={p.submitExpense}>Submit Expense Claim</button>
+          <h2>{p.editingClaimId ? 'Save Expense Changes' : 'Ready to Submit Expense'}</h2>
+          <p className="small muted">
+            {p.editingClaimId
+              ? 'This updates the existing expense record for the selected employee, week and claim type.'
+              : 'This will submit expense only. It is no longer linked to the weekly timesheet.'}
+          </p>
+
+          {p.editingClaimId ? (
+            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+              <button className="btn" onClick={p.saveEditedClaim}>Save Changes</button>
+              <button className="btn secondary" onClick={p.cancelEditClaim}>Cancel</button>
+            </div>
+          ) : (
+            <button className="btn" onClick={p.submitExpense}>Submit Expense Claim</button>
+          )}
         </div>
       </div>
     </div>
@@ -1927,6 +1928,18 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
           <Search size={16} />
           <input className="input" placeholder="Search employee, email or week..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+
+        <select
+          className="select"
+          value={historyTypeFilter}
+          onChange={e => setHistoryTypeFilter(e.target.value)}
+          style={{ maxWidth: 180 }}
+          aria-label="Filter claim type"
+        >
+          <option value="All">All</option>
+          <option value="timesheet">Timesheet</option>
+          <option value="expense">Expense</option>
+        </select>
 
         <button className="btn secondary" onClick={() => setClaims([])}>
           <RefreshCw size={16} /> Clear demo data
