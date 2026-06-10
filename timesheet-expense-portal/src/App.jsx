@@ -326,7 +326,6 @@ export default function App() {
   const [standardHours, setStandardHours] = useState('7.5');
   const [weeklyStandardHours, setWeeklyStandardHours] = useState('37.5');
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
   const [historyTypeFilter, setHistoryTypeFilter] = useState('All');
   const [receipt, setReceipt] = useState(null);
   const [editingClaimId, setEditingClaimId] = useState(null);
@@ -377,7 +376,6 @@ export default function App() {
 
     return (
       (!search || `${c.employeeName} ${c.email} ${c.week}`.toLowerCase().includes(search.toLowerCase())) &&
-      (statusFilter === 'All' || c.status === statusFilter) &&
       (historyTypeFilter === 'All' || claimType === historyTypeFilter)
     );
   });
@@ -714,7 +712,7 @@ export default function App() {
 
         {tab === 'history' && (
           <>
-            <Filter {...{ search, setSearch, statusFilter, setStatusFilter, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
+            <Filter {...{ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
             <ClaimList claims={filteredClaims} setReceipt={setReceipt} startEditClaim={startEditClaim} activeUser={activeUser} />
           </>
         )}
@@ -723,7 +721,7 @@ export default function App() {
           activeUser.role !== 'Manager'
             ? <div className="card"><div className="card-content muted">Switch to Manager demo user to approve claims.</div></div>
             : <>
-                <Filter {...{ search, setSearch, statusFilter, setStatusFilter, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
+                <Filter {...{ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
                 <ClaimList claims={filteredClaims} setReceipt={setReceipt} manager updateClaim={updateClaim} startEditClaim={startEditClaim} activeUser={activeUser} />
               </>
         )}
@@ -1445,7 +1443,7 @@ function ReadOnlyField({ label, value }) {
   );
 }
 
-function Filter({ search, setSearch, statusFilter, setStatusFilter, historyTypeFilter, setHistoryTypeFilter, setClaims }) {
+function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }) {
   return (
     <div className="card">
       <div className="card-content flex gap" style={{ flexWrap: 'wrap' }}>
@@ -1453,10 +1451,6 @@ function Filter({ search, setSearch, statusFilter, setStatusFilter, historyTypeF
           <Search size={16} />
           <input className="input" placeholder="Search employee, email or week..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-
-        <select className="select" style={{ width: 180 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          {['All', 'Draft', 'Submitted', 'Approved', 'Rejected', 'Paid'].map(s => <option key={s}>{s}</option>)}
-        </select>
 
         <button className="btn secondary" onClick={() => setClaims([])}>
           <RefreshCw size={16} /> Clear demo data
