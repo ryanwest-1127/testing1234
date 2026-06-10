@@ -419,107 +419,7 @@ export default function App() {
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
 
-  
-  const visibleLeaveRequests = activeUser.role === 'Manager'
-    ? leaveRequests
-    : leaveRequests.filter(r => r.employeeId === activeUser.id);
-
-  const approvedLeaveUsed = calculateApprovedLeaveDays(
-    activeUser.role === 'Manager'
-      ? leaveRequests
-      : leaveRequests.filter(r => r.employeeId === activeUser.id)
-  );
-
-  const annualLeaveTotal = 28;
-  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedLeaveUsed);
-
-  const leaveRequestDateKeys = (request) =>
-    getDatesBetween(request.startDate, request.endDate)
-      .filter(d => {
-        const day = d.getDay();
-        return day !== 0 && day !== 6;
-      })
-      .map(d => formatISODateLocal(d));
-
-  const hasOverlappingLeave = (candidate) => {
-    const candidateKeys = new Set(leaveRequestDateKeys(candidate));
-
-    return leaveRequests.some(existing => {
-      if (existing.employeeId !== activeUser.id) return false;
-      if (existing.status === 'Rejected') return false;
-      return leaveRequestDateKeys(existing).some(key => candidateKeys.has(key));
-    });
-  };
-
-  const submitAnnualLeave = () => {
-    setAlError('');
-
-    if (!alForm.startDate || !alForm.endDate) {
-      setAlError('Please select start date and end date.');
-      return;
-    }
-
-    if (new Date(alForm.endDate) < new Date(alForm.startDate)) {
-      setAlError('End date cannot be before start date.');
-      return;
-    }
-
-    if (calculateLeaveDays(alForm) <= 0) {
-      setAlError('Annual leave must include at least one weekday.');
-      return;
-    }
-
-    if (hasOverlappingLeave(alForm)) {
-      setAlError('This employee already has an annual leave request on one or more selected dates.');
-      return;
-    }
-
-    const newRequest = {
-      id: crypto.randomUUID(),
-      employeeId: activeUser.id,
-      employeeName: activeUser.name,
-      status: 'Submitted',
-      submittedAt: new Date().toLocaleString('en-GB'),
-      ...alForm
-    };
-
-    setLeaveRequests(prev => [newRequest, ...prev]);
-    setAlForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
-  };
-
-  const updateLeaveRequest = (id, patch) => {
-    setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
-  };
-
-  const selectAnnualLeaveDate = (date) => {
-    const key = formatISODateLocal(date);
-    setAlError('');
-    setAlForm(prev => {
-      if (!prev.startDate || (prev.startDate && prev.endDate)) {
-        return { ...prev, startDate: key, endDate: key };
-      }
-
-      if (new Date(key) < new Date(prev.startDate)) {
-        return { ...prev, startDate: key, endDate: prev.startDate };
-      }
-
-      return { ...prev, endDate: key };
-    });
-  };
-
-  const [alYear, alMonthNumber] = alMonth.split('-').map(Number);
-  const alMonthStart = new Date(alYear, alMonthNumber - 1, 1);
-  const alMonthEnd = new Date(alYear, alMonthNumber, 0);
-  const alFirstDay = alMonthStart.getDay() || 7;
-  const alBlanks = Array.from({ length: alFirstDay - 1 });
-  const alDays = Array.from({ length: alMonthEnd.getDate() }, (_, i) => new Date(alYear, alMonthNumber - 1, i + 1));
-
-  const leaveRequestsForDate = (date) => {
-    const key = formatISODateLocal(date);
-    return visibleLeaveRequests.filter(r => getDatesBetween(r.startDate, r.endDate).some(d => formatISODateLocal(d) === key));
-  };
-
-  return (
+    return (
       (!search || `${c.employeeName} ${c.email} ${c.week}`.toLowerCase().includes(search.toLowerCase())) &&
       (historyTypeFilter === 'All' || claimType === historyTypeFilter)
     );
@@ -724,6 +624,106 @@ export default function App() {
       return [{ ...newClaim, type: newType }, ...prev];
     });
   };
+
+  const visibleLeaveRequests = activeUser.role === 'Manager'
+    ? leaveRequests
+    : leaveRequests.filter(r => r.employeeId === activeUser.id);
+
+  const approvedLeaveUsed = calculateApprovedLeaveDays(
+    activeUser.role === 'Manager'
+      ? leaveRequests
+      : leaveRequests.filter(r => r.employeeId === activeUser.id)
+  );
+
+  const annualLeaveTotal = 28;
+  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedLeaveUsed);
+
+  const leaveRequestDateKeys = (request) =>
+    getDatesBetween(request.startDate, request.endDate)
+      .filter(d => {
+        const day = d.getDay();
+        return day !== 0 && day !== 6;
+      })
+      .map(d => formatISODateLocal(d));
+
+  const hasOverlappingLeave = (candidate) => {
+    const candidateKeys = new Set(leaveRequestDateKeys(candidate));
+
+    return leaveRequests.some(existing => {
+      if (existing.employeeId !== activeUser.id) return false;
+      if (existing.status === 'Rejected') return false;
+      return leaveRequestDateKeys(existing).some(key => candidateKeys.has(key));
+    });
+  };
+
+  const submitAnnualLeave = () => {
+    setAlError('');
+
+    if (!alForm.startDate || !alForm.endDate) {
+      setAlError('Please select start date and end date.');
+      return;
+    }
+
+    if (new Date(alForm.endDate) < new Date(alForm.startDate)) {
+      setAlError('End date cannot be before start date.');
+      return;
+    }
+
+    if (calculateLeaveDays(alForm) <= 0) {
+      setAlError('Annual leave must include at least one weekday.');
+      return;
+    }
+
+    if (hasOverlappingLeave(alForm)) {
+      setAlError('This employee already has an annual leave request on one or more selected dates.');
+      return;
+    }
+
+    const newRequest = {
+      id: crypto.randomUUID(),
+      employeeId: activeUser.id,
+      employeeName: activeUser.name,
+      status: 'Submitted',
+      submittedAt: new Date().toLocaleString('en-GB'),
+      ...alForm
+    };
+
+    setLeaveRequests(prev => [newRequest, ...prev]);
+    setAlForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
+  };
+
+  const updateLeaveRequest = (id, patch) => {
+    setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  };
+
+  const selectAnnualLeaveDate = (date) => {
+    const key = formatISODateLocal(date);
+    setAlError('');
+    setAlForm(prev => {
+      if (!prev.startDate || (prev.startDate && prev.endDate)) {
+        return { ...prev, startDate: key, endDate: key };
+      }
+
+      if (new Date(key) < new Date(prev.startDate)) {
+        return { ...prev, startDate: key, endDate: prev.startDate };
+      }
+
+      return { ...prev, endDate: key };
+    });
+  };
+
+  const [alYear, alMonthNumber] = alMonth.split('-').map(Number);
+  const alMonthStart = new Date(alYear, alMonthNumber - 1, 1);
+  const alMonthEnd = new Date(alYear, alMonthNumber, 0);
+  const alFirstDay = alMonthStart.getDay() || 7;
+  const alBlanks = Array.from({ length: alFirstDay - 1 });
+  const alDays = Array.from({ length: alMonthEnd.getDate() }, (_, i) => new Date(alYear, alMonthNumber - 1, i + 1));
+
+  const leaveRequestsForDate = (date) => {
+    const key = formatISODateLocal(date);
+    return visibleLeaveRequests.filter(r => getDatesBetween(r.startDate, r.endDate).some(d => formatISODateLocal(d) === key));
+  };
+
 
   return (
     <div className="bg-gradient min-h-screen">
