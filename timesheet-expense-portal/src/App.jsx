@@ -268,11 +268,35 @@ function formatISODateLocal(date) {
   return `${y}-${m}-${d}`;
 }
 
-function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
-  const timesheetClaims = claims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
-  const expenseClaims = claims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
 
-  const weekOptions = Array.from(new Set(claims.map(c => c.week).filter(Boolean))).sort();
+function claimTypeOf(claim) {
+  return claim.type || (claim.expenses ? 'expense' : 'timesheet');
+}
+
+function claimUniqueKey(claim) {
+  return `${claim.employeeId || ''}|${claim.week || ''}|${claimTypeOf(claim)}`;
+}
+
+function uniqueClaimsByEmployeeWeekType(claims) {
+  const seen = new Set();
+  const result = [];
+
+  (claims || []).forEach(claim => {
+    const key = claimUniqueKey(claim);
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(claim);
+  });
+
+  return result;
+}
+
+function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
+  const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
+  const timesheetClaims = cleanClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
+  const expenseClaims = cleanClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
+
+  const weekOptions = Array.from(new Set(cleanClaims.map(c => c.week).filter(Boolean))).sort();
   const latestSubmittedWeek = weekOptions.length ? weekOptions[weekOptions.length - 1] : selectedWeek;
   const currentWeekLimit = selectedWeek || latestSubmittedWeek;
 
@@ -301,7 +325,7 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
     .reduce((s, c) => s + Number(c.totals?.totalExpense || 0), 0);
 
   const outstandingExpenses = Math.max(0, totalExpenseClaims - approvedPaidExpenses);
-  const pendingApproval = claims.filter(c => c.status === 'Submitted').length;
+  const pendingApproval = cleanClaims.filter(c => c.status === 'Submitted').length;
 
   return {
     totalWorkingHours,
@@ -411,10 +435,12 @@ export default function App() {
     [claims, selectedWeek, weeklyStandardHours, leaveRequests]
   );
 
+  const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
+
   const visibleClaims =
     activeUser.role === 'Manager'
-      ? claims
-      : claims.filter(c => c.employeeId === employeeInfo.employeeId);
+      ? cleanClaims
+      : cleanClaims.filter(c => c.employeeId === employeeInfo.employeeId);
 
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
@@ -435,7 +461,7 @@ export default function App() {
     );
 
   const categoryData = Object.entries(categoryMap).map(([name, value]) => ({ name, value }));
-  const pending = claims.filter(c => c.status === 'Submitted').length;
+  const pending = cleanClaims.filter(c => c.status === 'Submitted').length;
 
   const updateTimesheet = (day, field, value) => {
     setTimesheet(prev => ({
@@ -551,39 +577,62 @@ export default function App() {
   const saveEditedClaim = () => {
     if (!editingClaimId || !editingOriginalClaim) return;
 
-    const updatedTotals = calculateTotals(timesheet, expenses, timeInLieu, standardHours);
+    const originalType = editingOriginalClaim.type || (editingOriginalClaim.expenses ? 'expense' : 'timesheet');
 
-    setClaims(prev => prev.map(c => {
-      if (c.id !== editingClaimId) return c;
+    let updatedClaim;
 
-      if ((editingOriginalClaim.type || 'timesheet') === 'expense') {
-        return {
-          ...c,
-          week: selectedWeek,
-          expenses,
-          totals: { totalExpense: updatedTotals.totalExpense },
-          status: c.status || 'Submitted',
-          editedAt: new Date().toLocaleString('en-GB')
-        };
-      }
+    if (originalType === 'expense') {
+      const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
+      updatedClaim = {
+        ...editingOriginalClaim,
+        week: selectedWeek,
+        weekLabel: weekLabel(selectedWeek),
+        expenses,
+        totals: { totalExpense: expenseTotal },
+        status: editingOriginalClaim.status || 'Submitted',
+        editedAt: new Date().toLocaleString('en-GB')
+      };
+    } else {
       const cleanedTimesheet = sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek);
       const cleanedTotals = calculateTotals(cleanedTimesheet, expenses, timeInLieu, standardHours);
 
-      return {
-        ...c,
+      updatedClaim = {
+        ...editingOriginalClaim,
         week: selectedWeek,
+        weekLabel: weekLabel(selectedWeek),
         timesheet: cleanedTimesheet,
         timeInLieu,
         standardHours,
         totals: cleanedTotals,
-        status: c.status || 'Submitted',
+        status: editingOriginalClaim.status || 'Submitted',
         editedAt: new Date().toLocaleString('en-GB')
       };
-    }));
+    }
+
+    const updatedType = updatedClaim.type || (updatedClaim.expenses ? 'expense' : 'timesheet');
+
+    setClaims(prev => {
+      const withoutOldAndConflicts = prev.filter(c => {
+        const type = c.type || (c.expenses ? 'expense' : 'timesheet');
+
+        if (c.id === editingClaimId) return false;
+
+        return !(
+          c.employeeId === updatedClaim.employeeId &&
+          c.week === updatedClaim.week &&
+          type === updatedType
+        );
+      });
+
+      return [updatedClaim, ...withoutOldAndConflicts];
+    });
 
     setEditingClaimId(null);
     setEditingOriginalClaim(null);
+    setTimesheet(defaultTimesheet());
+    setExpenses([makeExpense()]);
+    setTimeInLieu({ used: '0', earned: '0' });
     setTab('history');
   };
 
@@ -834,6 +883,9 @@ export default function App() {
               totals,
               saveDraft,
               submitTimesheet,
+              editingClaimId,
+              saveEditedClaim,
+              cancelEditClaim,
               setTab
             }}
           />
@@ -850,7 +902,10 @@ export default function App() {
               updateExpense,
               uploadReceipt,
               setReceipt,
-              submitExpense
+              submitExpense,
+              editingClaimId,
+              saveEditedClaim,
+              cancelEditClaim
             }}
           />
         )}
@@ -1029,11 +1084,12 @@ export default function App() {
 
 function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, setWeeklyStandardHours, activeUser, selectedWeek }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
+  const cleanVisibleClaims = uniqueClaimsByEmployeeWeekType(visibleClaims);
 
-  const timesheetClaims = visibleClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
-  const expenseClaims = visibleClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
+  const timesheetClaims = cleanVisibleClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
+  const expenseClaims = cleanVisibleClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
 
-  const weekOptions = Array.from(new Set(visibleClaims.map(c => c.week).filter(Boolean))).sort().reverse();
+  const weekOptions = Array.from(new Set(cleanVisibleClaims.map(c => c.week).filter(Boolean))).sort().reverse();
   const latestSubmittedWeek = weekOptions.length ? weekOptions[0] : selectedWeek;
   const currentWeekLimit = dashboardWeek === 'current' ? (selectedWeek || latestSubmittedWeek) : dashboardWeek;
 
@@ -1595,9 +1651,19 @@ function TimesheetForm(p) {
           <label className="label">Employee Notes</label>
           <textarea className="textarea" value={p.employeeInfo.notes} onChange={e => p.setEmployeeInfo({ ...p.employeeInfo, notes: e.target.value })} />
 
-          <button className="btn secondary" onClick={p.saveDraft}>Save Timesheet Draft</button>
-          {' '}
-          <button className="btn" onClick={p.submitTimesheet}>Submit Timesheet</button>
+          {p.editingClaimId ? (
+            <>
+              <button className="btn" onClick={p.saveEditedClaim}>Save Changes</button>
+              {' '}
+              <button className="btn secondary" onClick={p.cancelEditClaim}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <button className="btn secondary" onClick={p.saveDraft}>Save Timesheet Draft</button>
+              {' '}
+              <button className="btn" onClick={p.submitTimesheet}>Submit Timesheet</button>
+            </>
+          )}
         </div>
       </div>
     </div>
