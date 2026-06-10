@@ -1314,11 +1314,10 @@ function ExpenseForm(p) {
   return (
     <div className="space-y">
       <div className="card">
-        <div className="card-content grid grid-4">
+        <div className="card-content grid grid-3">
           <Mini label="Employee" value={p.employeeInfo.employeeName} />
           <Mini label="Week" value={weekLabel(p.selectedWeek)} />
           <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
-          <Mini label="Status" value="Draft input" />
         </div>
       </div>
 
@@ -1332,12 +1331,6 @@ function ExpenseForm(p) {
             <button className="btn secondary" onClick={() => p.setExpenses(prev => [...prev, makeExpense()])}>
               <Plus size={16} /> Add Expense
             </button>
-          </div>
-
-          <div className="card-dark" style={{ padding: 16 }}>
-            <p className="small">Current Expense Total</p>
-            <h2>{money(currentExpenseTotal)}</h2>
-            <p className="xsmall" style={{ color: '#cbd5e1' }}>This total updates while you type and will be added to Total Expense when submitted.</p>
           </div>
 
           {p.expenses.map((e, i) => (
