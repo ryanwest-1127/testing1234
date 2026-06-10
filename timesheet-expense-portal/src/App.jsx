@@ -47,17 +47,26 @@ function makeWeekValue(year, week) {
   return `${year}-W${String(week).padStart(2, '0')}`;
 }
 
+function getBusinessYearFirstMonday(year) {
+  const jan1 = new Date(Number(year), 0, 1);
+  const jan1Day = jan1.getDay() || 7; // Mon = 1, Sun = 7
+  const firstMonday = new Date(jan1);
+  firstMonday.setDate(jan1.getDate() - (jan1Day - 1));
+  return firstMonday;
+}
+
 function getWeeksInBusinessYear(year) {
-  const start = new Date(Number(year), 0, 1);
-  const end = new Date(Number(year), 11, 31);
-  const days = Math.floor((end - start) / 86400000) + 1;
+  const firstMonday = getBusinessYearFirstMonday(year);
+  const dec31 = new Date(Number(year), 11, 31);
+  const days = Math.floor((dec31 - firstMonday) / 86400000) + 1;
   return Math.ceil(days / 7);
 }
 
 function getBusinessWeekStart(weekValue) {
   const { year, week } = parseWeekValue(weekValue);
-  const start = new Date(year, 0, 1);
-  start.setDate(start.getDate() + (Number(week || 1) - 1) * 7);
+  const firstMonday = getBusinessYearFirstMonday(year);
+  const start = new Date(firstMonday);
+  start.setDate(firstMonday.getDate() + (Number(week || 1) - 1) * 7);
   return start;
 }
 
@@ -76,6 +85,12 @@ function getWeekDates(weekValue) {
       inYear: date.getFullYear() === year
     };
   });
+}
+
+function getBusinessWeekNumberFromDate(date, businessYear = date.getFullYear()) {
+  const firstMonday = getBusinessYearFirstMonday(businessYear);
+  const diffDays = Math.floor((date - firstMonday) / 86400000);
+  return Math.floor(diffDays / 7) + 1;
 }
 
 function getDateForWeekDay(week, dayIndex) {
@@ -886,12 +901,6 @@ function BusinessWeekPicker({ value, onChange }) {
     new Date(viewYear, i, 1).toLocaleDateString('en-GB', { month: 'long' })
   );
 
-  const getWeekFromDate = (date) => {
-    const yearStart = new Date(date.getFullYear(), 0, 1);
-    const diffDays = Math.floor((date - yearStart) / 86400000);
-    return Math.floor(diffDays / 7) + 1;
-  };
-
   const pickWeek = (targetYear, targetWeek) => {
     const safeWeek = Math.max(1, Math.min(Number(targetWeek), getWeeksInBusinessYear(targetYear)));
     const nextValue = makeWeekValue(targetYear, safeWeek);
@@ -904,8 +913,8 @@ function BusinessWeekPicker({ value, onChange }) {
   const getWeeksForMonth = () => {
     const start = new Date(viewYear, viewMonth, 1);
     const end = new Date(viewYear, viewMonth + 1, 0);
-    const firstWeek = getWeekFromDate(start);
-    const lastWeek = getWeekFromDate(end);
+    const firstWeek = Math.max(1, getBusinessWeekNumberFromDate(start, viewYear));
+    const lastWeek = Math.min(getWeeksInBusinessYear(viewYear), getBusinessWeekNumberFromDate(end, viewYear));
 
     const weeks = [];
     for (let w = firstWeek; w <= lastWeek; w += 1) {
@@ -915,17 +924,12 @@ function BusinessWeekPicker({ value, onChange }) {
   };
 
   const weeksForMonth = getWeeksForMonth();
-
   const formatDay = (date) => String(date.getDate()).padStart(2, '0');
 
   const buildWeekRow = (weekNumber) => {
     const weekValue = makeWeekValue(viewYear, weekNumber);
     const dates = getWeekDates(weekValue);
-
-    return {
-      weekNumber,
-      dates
-    };
+    return { weekNumber, dates };
   };
 
   return (
@@ -1068,7 +1072,7 @@ function BusinessWeekPicker({ value, onChange }) {
             </div>
 
             <div className="xsmall muted">
-              One row equals one week. Week 1 starts from 1 January. Final week stays in December and may be shorter.
+              Calendar follows the real weekday layout. Out-of-year dates are locked in the timesheet.
             </div>
           </div>
         </div>
