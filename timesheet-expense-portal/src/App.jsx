@@ -1139,6 +1139,11 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
       return sum + Number(row.travelHours || 0);
     }, 0);
 
+    const takeBackTimeInLieu = weekOnlyTimesheetClaims.reduce((sum, claim) => {
+      const row = claim.timesheet?.[day] || {};
+      return sum + Number(row.takeBackTimeInLieu || 0);
+    }, 0);
+
     const totalWorked = projectHours + travelHours;
     const standardProject = Math.min(projectHours, dailyStandardHours);
     const remainingStandardAfterProject = Math.max(0, dailyStandardHours - standardProject);
@@ -1149,8 +1154,9 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
       day: `${day.slice(0, 3)} ${weekDateLabels[index]?.label || ''}`,
       project: standardProject,
       travel: standardTravel,
+      takeBackTimeInLieu,
       timeInLieu,
-      total: totalWorked
+      total: totalWorked + takeBackTimeInLieu
     };
   });
 
@@ -1225,7 +1231,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         />
       </div>
 
-      <ChartCard title="Daily Hours Breakdown vs 7.5h Standard" sub="Project / Workshop and Travel are shown separately. Red = Time in Lieu over 7.5h.">
+      <ChartCard title="Daily Hours Breakdown vs 7.5h Standard" sub="Project / Workshop, Travel, Take back TIL and Time in Lieu are shown separately.">
         {dailyHoursData.every(item => item.total === 0) ? (
           <div className="muted" style={{ padding: 24 }}>No timesheet data for this week yet.</div>
         ) : (
@@ -1241,12 +1247,15 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
                     ? 'Project / Workshop'
                     : name === 'travel'
                       ? 'Travel'
-                      : 'Time in Lieu'
+                      : name === 'takeBackTimeInLieu'
+                        ? 'Take back TIL'
+                        : 'Time in Lieu'
                 ]}
                 labelFormatter={(label) => `${label}`}
               />
               <Bar dataKey="project" stackId="hours" fill="#2563eb" radius={[6, 6, 0, 0]} />
               <Bar dataKey="travel" stackId="hours" fill="#16a34a" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="takeBackTimeInLieu" stackId="hours" fill="#eab308" radius={[6, 6, 0, 0]} />
               <Bar dataKey="timeInLieu" stackId="hours" fill="#dc2626" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -1255,6 +1264,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         <div className="flex gap items-center" style={{ marginTop: 12, flexWrap: 'wrap' }}>
           <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#2563eb', borderRadius: 3, marginRight: 6 }} />Project / Workshop</span>
           <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#16a34a', borderRadius: 3, marginRight: 6 }} />Travel</span>
+          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#eab308', borderRadius: 3, marginRight: 6 }} />Take back TIL</span>
           <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#dc2626', borderRadius: 3, marginRight: 6 }} />Time in Lieu over 7.5h</span>
         </div>
       </ChartCard>
@@ -1281,13 +1291,14 @@ function BusinessWeekPicker({ value, onChange }) {
     new Date(viewYear, i, 1).toLocaleDateString('en-GB', { month: 'long' })
   );
 
-  const pickWeek = (targetYear, targetWeek) => {
+  const pickWeek = (targetYear, targetWeek, closeAfterPick = false) => {
     const safeWeek = Math.max(1, Math.min(Number(targetWeek), getWeeksInBusinessYear(targetYear)));
     const nextValue = makeWeekValue(targetYear, safeWeek);
     const nextStart = getBusinessWeekStart(nextValue);
     setViewYear(targetYear);
     setViewMonth(nextStart.getMonth());
     onChange(nextValue);
+    if (closeAfterPick) setOpen(false);
   };
 
   const getWeeksForMonth = () => {
@@ -1373,7 +1384,7 @@ function BusinessWeekPicker({ value, onChange }) {
                 <select
                   className="select"
                   value={week}
-                  onChange={e => pickWeek(viewYear, Number(e.target.value))}
+                  onChange={e => pickWeek(viewYear, Number(e.target.value), true)}
                 >
                   {Array.from({ length: weeksInYear }, (_, i) => i + 1).map(w => (
                     <option key={w} value={w}>Week {w}</option>
@@ -1404,7 +1415,7 @@ function BusinessWeekPicker({ value, onChange }) {
                   <React.Fragment key={`week-row-${weekNumber}`}>
                     <button
                       type="button"
-                      onClick={() => pickWeek(viewYear, weekNumber)}
+                      onClick={() => pickWeek(viewYear, weekNumber, true)}
                       style={{
                         border: '1px solid ' + (isSelectedWeek ? '#2563eb' : '#e2e8f0'),
                         background: isSelectedWeek ? '#dbeafe' : '#f8fafc',
@@ -1426,7 +1437,7 @@ function BusinessWeekPicker({ value, onChange }) {
                         <button
                           type="button"
                           key={`${weekNumber}-${dayIndex}`}
-                          onClick={() => pickWeek(viewYear, weekNumber)}
+                          onClick={() => pickWeek(viewYear, weekNumber, true)}
                           style={{
                             border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
                             background: isSelected
