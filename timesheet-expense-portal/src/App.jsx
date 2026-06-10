@@ -867,6 +867,12 @@ function BusinessWeekPicker({ value, onChange }) {
     return Math.floor(diffDays / 7) + 1;
   };
 
+  const getMondayForCalendarRow = (rowIndex) => {
+    const monday = new Date(monthStart);
+    monday.setDate(monthStart.getDate() - (firstDay - 1) + rowIndex * 7);
+    return monday;
+  };
+
   const selectedDateKeys = new Set(
     selectedWeekDates
       .filter(d => d.inYear)
@@ -970,26 +976,34 @@ function BusinessWeekPicker({ value, onChange }) {
               ))}
 
               {rows.map((row, rowIndex) => {
-                const firstDateInRow = row.find(Boolean);
-                const weekNumber = firstDateInRow ? getWeekFromDate(firstDateInRow) : '';
+                const rowMonday = getMondayForCalendarRow(rowIndex);
+                const rowWeekNumber = getWeekFromDate(rowMonday);
+                const rowYear = rowMonday.getFullYear();
+                const isSelectedWeekRow = rowWeekNumber === week && rowYear === year;
 
                 return (
                   <React.Fragment key={`week-row-${rowIndex}`}>
                     <button
                       type="button"
                       className="xsmall muted"
-                      disabled={!firstDateInRow}
-                      onClick={() => firstDateInRow && pickDate(firstDateInRow)}
+                      onClick={() => {
+                        const targetWeek = Math.max(1, Math.min(rowWeekNumber, getWeeksInBusinessYear(rowYear)));
+                        const nextValue = makeWeekValue(rowYear, targetWeek);
+                        const nextStart = getBusinessWeekStart(nextValue);
+                        setViewYear(rowYear);
+                        setViewMonth(nextStart.getMonth());
+                        onChange(nextValue);
+                      }}
                       style={{
-                        border: '1px solid #e2e8f0',
-                        background: '#f8fafc',
+                        border: '1px solid ' + (isSelectedWeekRow ? '#2563eb' : '#e2e8f0'),
+                        background: isSelectedWeekRow ? '#dbeafe' : '#f8fafc',
                         borderRadius: 10,
                         minHeight: 44,
-                        cursor: firstDateInRow ? 'pointer' : 'default',
+                        cursor: 'pointer',
                         fontWeight: 700
                       }}
                     >
-                      {weekNumber ? `W${weekNumber}` : ''}
+                      {rowWeekNumber ? `W${rowWeekNumber}` : ''}
                     </button>
 
                     {Array.from({ length: 7 }, (_, dayIndex) => {
