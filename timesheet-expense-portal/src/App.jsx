@@ -34,27 +34,59 @@ function formatDateDDMMYYYY(date) {
   return d.toLocaleDateString('en-GB');
 }
 
-function getMondayFromWeekValue(weekValue) {
-  if (!weekValue || !weekValue.includes('-W')) return new Date();
-  const [yearStr, weekStr] = weekValue.split('-W');
-  const year = Number(yearStr);
-  const week = Number(weekStr);
-  const jan4 = new Date(year, 0, 4);
-  const jan4Day = jan4.getDay() || 7;
-  const monday = new Date(jan4);
-  monday.setDate(jan4.getDate() - jan4Day + 1 + (week - 1) * 7);
-  return monday;
+function parseWeekValue(weekValue) {
+  const match = String(weekValue || '').match(/^(\d{4})-W(\d{2})$/);
+  if (!match) {
+    const year = new Date().getFullYear();
+    return { year, week: 1 };
+  }
+  return { year: Number(match[1]), week: Number(match[2]) };
+}
+
+function makeWeekValue(year, week) {
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+function getWeeksInBusinessYear(year) {
+  const start = new Date(Number(year), 0, 1);
+  const end = new Date(Number(year), 11, 31);
+  const days = Math.floor((end - start) / 86400000) + 1;
+  return Math.ceil(days / 7);
+}
+
+function getBusinessWeekStart(weekValue) {
+  const { year, week } = parseWeekValue(weekValue);
+  const start = new Date(year, 0, 1);
+  start.setDate(start.getDate() + (Number(week || 1) - 1) * 7);
+  return start;
 }
 
 function getWeekDates(weekValue) {
-  const monday = getMondayFromWeekValue(weekValue);
+  const { year } = parseWeekValue(weekValue);
+  const start = getBusinessWeekStart(weekValue);
+
   return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day, index) => {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + index);
-    return { day, date, label: formatDateDDMMYYYY(date) };
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+
+    return {
+      day,
+      date,
+      label: date.getFullYear() === year ? formatDateDDMMYYYY(date) : '',
+      inYear: date.getFullYear() === year
+    };
   });
 }
 
+function getDateForWeekDay(week, dayIndex) {
+  const item = getWeekDates(week)[dayIndex];
+  return item?.label || '—';
+}
+
+function weekLabel(week) {
+  const { year, week: weekNumber } = parseWeekValue(week);
+  return `Week ${weekNumber}, ${year}`;
+}
 
 function defaultTimesheet() {
   return Object.fromEntries(
@@ -91,10 +123,7 @@ function money(v) {
   }).format(Number(v || 0));
 }
 
-function weekLabel(week) {
-  const [y, w] = week.split('-W');
-  return `Week ${w}, ${y}`;
-}
+
 
 
 
@@ -114,13 +143,7 @@ function getWeekStartDate(weekValue) {
   return monday;
 }
 
-function getDateForWeekDay(week, dayIndex) {
-  if (!week || !week.includes('-W')) return '';
-  const monday = getWeekStartDate(week);
-  const date = new Date(monday);
-  date.setUTCDate(monday.getUTCDate() + dayIndex);
-  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-}
+
 
 function calculateDailyTimeInLieu(row, standardHours) {
   const worked =
@@ -816,6 +839,131 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
 
 
 
+
+function BusinessWeekPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const { year, week } = parseWeekValue(value);
+  const [viewYear, setViewYear] = useState(year);
+  const [viewMonth, setViewMonth] = useState(() => {
+    const start = getBusinessWeekStart(value);
+    return start.getMonth();
+  });
+
+  const selectedWeekDates = getWeekDates(value);
+  const weeksInYear = getWeeksInBusinessYear(viewYear);
+  const monthStart = new Date(viewYear, viewMonth, 1);
+  const monthEnd = new Date(viewYear, viewMonth + 1, 0);
+  const firstDay = monthStart.getDay() || 7;
+  const blanks = Array.from({ length: firstDay - 1 });
+  const monthDays = Array.from({ length: monthEnd.getDate() }, (_, i) => new Date(viewYear, viewMonth, i + 1));
+
+  const getWeekFromDate = (date) => {
+    const yearStart = new Date(date.getFullYear(), 0, 1);
+    const diffDays = Math.floor((date - yearStart) / 86400000);
+    return Math.floor(diffDays / 7) + 1;
+  };
+
+  const selectedDateKeys = new Set(
+    selectedWeekDates
+      .filter(d => d.inYear)
+      .map(d => d.date.toISOString().slice(0, 10))
+  );
+
+  const pickDate = (date) => {
+    const nextWeek = getWeekFromDate(date);
+    onChange(makeWeekValue(date.getFullYear(), nextWeek));
+    setOpen(false);
+  };
+
+  const changeMonth = (offset) => {
+    const next = new Date(viewYear, viewMonth + offset, 1);
+    setViewYear(next.getFullYear());
+    setViewMonth(next.getMonth());
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="input"
+        onClick={() => setOpen(v => !v)}
+        style={{ textAlign: 'left', cursor: 'pointer' }}
+      >
+        {weekLabel(value)} 📅
+      </button>
+
+      <div className="small muted" style={{ marginTop: 6 }}>
+        {selectedWeekDates.map(d => d.inYear ? d.label : '—').join('  ·  ')}
+      </div>
+
+      {open && (
+        <div
+          className="card"
+          style={{
+            position: 'absolute',
+            zIndex: 50,
+            top: '100%',
+            right: 0,
+            marginTop: 8,
+            width: 360,
+            boxShadow: '0 24px 60px rgba(15,23,42,.18)'
+          }}
+        >
+          <div className="card-content space-y-sm">
+            <div className="flex justify-between items-center">
+              <button type="button" className="btn ghost" onClick={() => changeMonth(-1)}>‹</button>
+              <div style={{ textAlign: 'center' }}>
+                <b>{monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</b>
+                <p className="xsmall muted">Custom business weeks · Monday first</p>
+              </div>
+              <button type="button" className="btn ghost" onClick={() => changeMonth(1)}>›</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, textAlign: 'center' }}>
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+                <b key={`${d}-${i}`} className="xsmall muted">{d}</b>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+              {blanks.map((_, i) => <div key={`blank-${i}`} />)}
+              {monthDays.map(day => {
+                const key = day.toISOString().slice(0, 10);
+                const isSelected = selectedDateKeys.has(key);
+                const weekNumber = getWeekFromDate(day);
+
+                return (
+                  <button
+                    type="button"
+                    key={key}
+                    onClick={() => pickDate(day)}
+                    title={`Week ${weekNumber}`}
+                    style={{
+                      border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
+                      background: isSelected ? '#dbeafe' : '#fff',
+                      color: '#0f172a',
+                      borderRadius: 10,
+                      minHeight: 44,
+                      cursor: 'pointer',
+                      fontWeight: isSelected ? 700 : 500
+                    }}
+                  >
+                    {day.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="xsmall muted">
+              Week 1 starts from 1 January. Final week stays in December and may be shorter.
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TimesheetForm(p) {
   const weekDates = getWeekDates(p.selectedWeek);
   return (
@@ -827,7 +975,7 @@ function TimesheetForm(p) {
           <Field label="Employee ID" value={p.employeeInfo.employeeId} onChange={v => p.setEmployeeInfo({ ...p.employeeInfo, employeeId: v })} />
           <div>
             <label className="label">Week</label>
-            <input className="input" type="week" value={p.selectedWeek} onChange={e => p.setSelectedWeek(e.target.value)} />
+            <BusinessWeekPicker value={p.selectedWeek} onChange={p.setSelectedWeek} />
           </div>
         </div>
       </div>
