@@ -28,6 +28,13 @@ const fields = [
 
 const categories = ['Travel', 'Hotel', 'Lunch / Dinner', 'Training', 'Mileage', 'Other'];
 
+const vatRateOptions = [
+  { value: '20', label: '20% VAT' },
+  { value: '5', label: '5% VAT' },
+  { value: '0', label: 'No VAT / 0%' },
+  { value: 'custom', label: 'Custom' },
+];
+
 function formatDateDDMMYYYY(date) {
   if (!date) return '';
   const d = new Date(date);
@@ -127,10 +134,20 @@ function makeExpense() {
     category: 'Travel',
     description: '',
     amount: '',
+    vatRate: '20',
     vat: '',
     receiptName: '',
     receiptPreview: ''
   };
+}
+
+function calculateVATFromGrossAmount(amount, rate) {
+  const gross = Number(amount || 0);
+  const vatRate = Number(rate || 0);
+
+  if (!gross || !vatRate) return '';
+
+  return (gross * vatRate / (100 + vatRate)).toFixed(2);
 }
 
 function money(v) {
@@ -497,7 +514,25 @@ export default function App() {
 
   const updateExpense = (i, field, value) => {
     setExpenses(prev =>
-      prev.map((e, idx) => idx === i ? { ...e, [field]: value } : e)
+      prev.map((e, idx) => {
+        if (idx !== i) return e;
+
+        const updated = { ...e, [field]: value };
+        const selectedVatRate = updated.vatRate || 'custom';
+
+        if (field === 'vat') {
+          return { ...updated, vatRate: 'custom' };
+        }
+
+        if (selectedVatRate !== 'custom' && (field === 'amount' || field === 'vatRate')) {
+          return {
+            ...updated,
+            vat: calculateVATFromGrossAmount(updated.amount, selectedVatRate)
+          };
+        }
+
+        return updated;
+      })
     );
   };
 
@@ -1801,8 +1836,12 @@ function ExpenseForm(p) {
             </button>
           </div>
 
-          {p.expenses.map((e, i) => (
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr 2fr 1.5fr auto' }} key={e.id}>
+          {p.expenses.map((e, i) => {
+            const selectedVatRate = e.vatRate || 'custom';
+            const vatIsCustom = selectedVatRate === 'custom';
+
+            return (
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 2fr 1.5fr auto' }} key={e.id}>
               <input className="input" type="date" value={e.date} onChange={ev => p.updateExpense(i, 'date', ev.target.value)} />
 
               <select className="select" value={e.category} onChange={ev => p.updateExpense(i, 'category', ev.target.value)}>
@@ -1810,7 +1849,19 @@ function ExpenseForm(p) {
               </select>
 
               <input className="input" type="number" placeholder="Amount" value={e.amount} onChange={ev => p.updateExpense(i, 'amount', ev.target.value)} />
-              <input className="input" type="number" placeholder="VAT" value={e.vat || ''} onChange={ev => p.updateExpense(i, 'vat', ev.target.value)} />
+              <select className="select" value={selectedVatRate} onChange={ev => p.updateExpense(i, 'vatRate', ev.target.value)}>
+                {vatRateOptions.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <input
+                className="input"
+                type="number"
+                placeholder="VAT"
+                value={e.vat || ''}
+                disabled={!vatIsCustom}
+                onChange={ev => p.updateExpense(i, 'vat', ev.target.value)}
+              />
               <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
 
               <label className="btn secondary">
@@ -1828,7 +1879,8 @@ function ExpenseForm(p) {
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
