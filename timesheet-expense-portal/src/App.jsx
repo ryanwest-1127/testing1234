@@ -1452,6 +1452,22 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
           <input className="input" placeholder="Search employee, email or week..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
+        <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+          {[
+            { label: 'All', value: 'All' },
+            { label: 'Timesheet', value: 'timesheet' },
+            { label: 'Expense', value: 'expense' }
+          ].map(item => (
+            <button
+              key={item.value}
+              className={`btn ${historyTypeFilter === item.value ? '' : 'secondary'}`}
+              onClick={() => setHistoryTypeFilter(item.value)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
         <button className="btn secondary" onClick={() => setClaims([])}>
           <RefreshCw size={16} /> Clear demo data
         </button>
