@@ -344,6 +344,8 @@ export default function App() {
   const [activeUser, setActiveUser] = useState(employees[0]);
   const [claims, setClaims] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [alForm, setAlForm] = useState({ startDate: '', endDate: '', duration: 'full', reason: '' });
+  const [alError, setAlError] = useState('');
   const [selectedWeek, setSelectedWeek] = useState('2026-W21');
 
   const [employeeInfo, setEmployeeInfo] = useState({
@@ -424,6 +426,65 @@ export default function App() {
 
   const updateLeaveRequest = (id, patch) => {
     setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  };
+
+
+  const visibleLeaveRequests = activeUser.role === 'Manager'
+    ? leaveRequests
+    : leaveRequests.filter(r => r.employeeId === activeUser.id);
+
+  const approvedLeaveUsed = calculateApprovedLeaveDays(
+    activeUser.role === 'Manager'
+      ? leaveRequests
+      : leaveRequests.filter(r => r.employeeId === activeUser.id)
+  );
+
+  const annualLeaveTotal = 28;
+  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedLeaveUsed);
+
+  const leaveRequestDateKeys = (request) =>
+    getDatesBetween(request.startDate, request.endDate)
+      .filter(d => {
+        const day = d.getDay();
+        return day !== 0 && day !== 6;
+      })
+      .map(d => d.toISOString().slice(0, 10));
+
+  const hasOverlappingLeave = (candidate) => {
+    const candidateKeys = new Set(leaveRequestDateKeys(candidate));
+
+    return leaveRequests.some(existing => {
+      if (existing.employeeId !== activeUser.id) return false;
+      if (existing.status === 'Rejected') return false;
+      return leaveRequestDateKeys(existing).some(key => candidateKeys.has(key));
+    });
+  };
+
+  const submitAnnualLeave = () => {
+    setAlError('');
+
+    if (!alForm.startDate || !alForm.endDate) {
+      setAlError('Please select start date and end date.');
+      return;
+    }
+
+    if (new Date(alForm.endDate) < new Date(alForm.startDate)) {
+      setAlError('End date cannot be before start date.');
+      return;
+    }
+
+    if (calculateLeaveDays(alForm) <= 0) {
+      setAlError('Annual leave must include at least one weekday.');
+      return;
+    }
+
+    if (hasOverlappingLeave(alForm)) {
+      setAlError('This employee already has an AL request on one or more selected dates.');
+      return;
+    }
+
+    submitLeaveRequest(alForm);
+    setAlForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
   };
 
   return (
@@ -764,12 +825,103 @@ export default function App() {
 
 
         {tab === 'annualLeave' && (
-          <AnnualLeavePage
-            activeUser={activeUser}
-            leaveRequests={leaveRequests}
-            submitLeaveRequest={submitLeaveRequest}
-            updateLeaveRequest={updateLeaveRequest}
-          />
+          <div className="space-y">
+            <div className="card">
+              <div className="card-content">
+                <h2>Annual Leave</h2>
+                <p className="small muted">Apply annual leave here. Approved AL will deduct from the top card Annual Leave Remaining.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-3">
+              <Insight title="Annual Leave Remaining" value={`${annualLeaveRemaining} / ${annualLeaveTotal} days`} note="Approved AL deducted" icon={<CalendarDays />} />
+              <Insight title="Pending AL" value={String(visibleLeaveRequests.filter(r => r.status === 'Submitted').length)} note="Waiting for approval" icon={<Clock />} />
+              <Insight title="Approved AL Used" value={`${approvedLeaveUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
+            </div>
+
+            <div className="card">
+              <div className="card-content space-y-sm">
+                <h2>Apply Annual Leave</h2>
+
+                {alError && (
+                  <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>
+                    {alError}
+                  </div>
+                )}
+
+                <div className="grid grid-3">
+                  <Field label="Start Date" type="date" value={alForm.startDate} onChange={v => setAlForm(p => ({ ...p, startDate: v }))} />
+                  <Field label="End Date" type="date" value={alForm.endDate} onChange={v => setAlForm(p => ({ ...p, endDate: v }))} />
+
+                  <div>
+                    <label className="label">Duration</label>
+                    <select className="select" value={alForm.duration} onChange={e => setAlForm(p => ({ ...p, duration: e.target.value }))}>
+                      <option value="full">Full day</option>
+                      <option value="half">Half day</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Reason / Notes</label>
+                  <textarea className="textarea" value={alForm.reason} onChange={e => setAlForm(p => ({ ...p, reason: e.target.value }))} />
+                </div>
+
+                <div className="card-dark" style={{ padding: 16 }}>
+                  <p className="small">Selected AL Days</p>
+                  <h2>{calculateLeaveDays(alForm)} day(s)</h2>
+                  <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Submitted requests do not deduct until approved.</p>
+                </div>
+
+                <button className="btn" onClick={submitAnnualLeave}>Submit Annual Leave</button>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-content">
+                <h2>Annual Leave Requests</h2>
+
+                {visibleLeaveRequests.length === 0 ? (
+                  <p className="muted">No annual leave requests yet.</p>
+                ) : (
+                  <div className="wide">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Dates</th>
+                          <th>Duration</th>
+                          <th>Days</th>
+                          <th>Status</th>
+                          <th>Reason</th>
+                          {activeUser.role === 'Manager' && <th>Action</th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleLeaveRequests.map(r => (
+                          <tr key={r.id}>
+                            <td>{r.employeeName}</td>
+                            <td>{r.startDate} → {r.endDate}</td>
+                            <td>{r.duration === 'half' ? 'Half day' : 'Full day'}</td>
+                            <td>{calculateLeaveDays(r)}</td>
+                            <td><span className={`badge ${r.status}`}>{r.status}</span></td>
+                            <td>{r.reason || '—'}</td>
+                            {activeUser.role === 'Manager' && (
+                              <td>
+                                <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
+                                {' '}
+                                <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         {tab === 'history' && (
@@ -1505,170 +1657,6 @@ function ReadOnlyField({ label, value }) {
   );
 }
 
-
-function AnnualLeavePage({ activeUser, leaveRequests, submitLeaveRequest, updateLeaveRequest }) {
-  const [form, setForm] = useState({ startDate: '', endDate: '', duration: 'full', reason: '' });
-  const [error, setError] = useState('');
-
-  const visibleRequests = activeUser.role === 'Manager'
-    ? leaveRequests
-    : leaveRequests.filter(r => r.employeeId === activeUser.id);
-
-  const approvedUsed = calculateApprovedLeaveDays(
-    activeUser.role === 'Manager'
-      ? leaveRequests
-      : leaveRequests.filter(r => r.employeeId === activeUser.id)
-  );
-
-  const annualLeaveTotal = 28;
-  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedUsed);
-  const pendingCount = visibleRequests.filter(r => r.status === 'Submitted').length;
-
-  const requestDateKeys = (request) =>
-    getDatesBetween(request.startDate, request.endDate)
-      .filter(d => {
-        const day = d.getDay();
-        return day !== 0 && day !== 6;
-      })
-      .map(d => d.toISOString().slice(0, 10));
-
-  const hasOverlap = (candidate) => {
-    const candidateKeys = new Set(requestDateKeys(candidate));
-    return leaveRequests.some(existing => {
-      if (existing.employeeId !== activeUser.id) return false;
-      if (existing.status === 'Rejected') return false;
-      return requestDateKeys(existing).some(key => candidateKeys.has(key));
-    });
-  };
-
-  const submit = () => {
-    setError('');
-
-    if (!form.startDate || !form.endDate) {
-      setError('Please select start date and end date.');
-      return;
-    }
-
-    if (new Date(form.endDate) < new Date(form.startDate)) {
-      setError('End date cannot be before start date.');
-      return;
-    }
-
-    if (calculateLeaveDays(form) <= 0) {
-      setError('Annual leave must include at least one weekday.');
-      return;
-    }
-
-    if (hasOverlap(form)) {
-      setError('This employee already has an AL request on one or more selected dates.');
-      return;
-    }
-
-    submitLeaveRequest(form);
-    setForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
-  };
-
-  return (
-    <div className="space-y">
-      <div className="card">
-        <div className="card-content">
-          <h2>Annual Leave</h2>
-          <p className="small muted">
-            Apply annual leave here. Submitted requests do not deduct balance until manager approval.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-3">
-        <Insight title="Annual Leave Remaining" value={`${annualLeaveRemaining} / ${annualLeaveTotal} days`} note="Approved AL deducted" icon={<CalendarDays />} />
-        <Insight title="Pending AL" value={String(pendingCount)} note="Waiting for approval" icon={<Clock />} />
-        <Insight title="Approved AL Used" value={`${approvedUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
-      </div>
-
-      <div className="card">
-        <div className="card-content space-y-sm">
-          <h2>Apply Annual Leave</h2>
-
-          {error && (
-            <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>
-              {error}
-            </div>
-          )}
-
-          <div className="grid grid-3">
-            <Field label="Start Date" type="date" value={form.startDate} onChange={v => setForm(p => ({ ...p, startDate: v }))} />
-            <Field label="End Date" type="date" value={form.endDate} onChange={v => setForm(p => ({ ...p, endDate: v }))} />
-            <div>
-              <label className="label">Duration</label>
-              <select className="select" value={form.duration} onChange={e => setForm(p => ({ ...p, duration: e.target.value }))}>
-                <option value="full">Full day</option>
-                <option value="half">Half day</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="label">Reason / Notes</label>
-            <textarea className="textarea" value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} />
-          </div>
-
-          <div className="card-dark" style={{ padding: 16 }}>
-            <p className="small">Selected AL Days</p>
-            <h2>{calculateLeaveDays(form)} day(s)</h2>
-            <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Approved requests deduct from top card balance.</p>
-          </div>
-
-          <button className="btn" onClick={submit}>Submit Annual Leave</button>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-content">
-          <h2>Annual Leave Requests</h2>
-
-          {visibleRequests.length === 0 ? (
-            <p className="muted">No annual leave requests yet.</p>
-          ) : (
-            <div className="wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Dates</th>
-                    <th>Duration</th>
-                    <th>Days</th>
-                    <th>Status</th>
-                    <th>Reason</th>
-                    {activeUser.role === 'Manager' && <th>Action</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRequests.map(r => (
-                    <tr key={r.id}>
-                      <td>{r.employeeName}</td>
-                      <td>{r.startDate} → {r.endDate}</td>
-                      <td>{r.duration === 'half' ? 'Half day' : 'Full day'}</td>
-                      <td>{calculateLeaveDays(r)}</td>
-                      <td><span className={`badge ${r.status}`}>{r.status}</span></td>
-                      <td>{r.reason || '—'}</td>
-                      {activeUser.role === 'Manager' && (
-                        <td>
-                          <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
-                          {' '}
-                          <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }) {
   return (
