@@ -1130,6 +1130,7 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
     duration: 'full',
     reason: ''
   });
+  const [leaveError, setLeaveError] = useState('');
 
   const [year, monthNumber] = month.split('-').map(Number);
   const monthStart = new Date(year, monthNumber - 1, 1);
@@ -1138,13 +1139,36 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
   const blanks = Array.from({ length: firstDay - 1 });
   const days = Array.from({ length: monthEnd.getDate() }, (_, i) => new Date(year, monthNumber - 1, i + 1));
 
-  const approvedUsed = calculateApprovedLeaveDays(leaveRequests);
-  const annualLeaveTotal = 28;
-  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedUsed);
-
   const userRequests = activeUser.role === 'Manager'
     ? leaveRequests
     : leaveRequests.filter(r => r.employeeId === activeUser.id);
+
+  const approvedUsed = calculateApprovedLeaveDays(
+    activeUser.role === 'Manager'
+      ? leaveRequests
+      : leaveRequests.filter(r => r.employeeId === activeUser.id)
+  );
+  const annualLeaveTotal = 28;
+  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedUsed);
+
+  const requestDateKeys = (request) =>
+    getDatesBetween(request.startDate, request.endDate)
+      .filter(d => {
+        const day = d.getDay();
+        return day !== 0 && day !== 6;
+      })
+      .map(d => d.toISOString().slice(0, 10));
+
+  const hasOverlappingLeave = (candidate) => {
+    const candidateKeys = new Set(requestDateKeys(candidate));
+    return leaveRequests.some(existing => {
+      if (existing.employeeId !== activeUser.id) return false;
+      if (existing.status === 'Rejected') return false;
+
+      const existingKeys = requestDateKeys(existing);
+      return existingKeys.some(key => candidateKeys.has(key));
+    });
+  };
 
   const requestsForDate = (date) => {
     const key = date.toISOString().slice(0, 10);
@@ -1152,13 +1176,49 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
   };
 
   const submit = () => {
-    if (!leaveForm.startDate || !leaveForm.endDate) return;
+    setLeaveError('');
+
+    if (!leaveForm.startDate || !leaveForm.endDate) {
+      setLeaveError('Please select start date and end date.');
+      return;
+    }
+
+    if (new Date(leaveForm.endDate) < new Date(leaveForm.startDate)) {
+      setLeaveError('End date cannot be before start date.');
+      return;
+    }
+
+    const requestedDays = calculateLeaveDays(leaveForm);
+    if (requestedDays <= 0) {
+      setLeaveError('Annual leave must include at least one weekday.');
+      return;
+    }
+
+    if (hasOverlappingLeave(leaveForm)) {
+      setLeaveError('This employee already has an annual leave request on one or more selected dates.');
+      return;
+    }
+
     submitLeaveRequest(leaveForm);
     setLeaveForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
   };
 
+  const monthLabel = monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
   return (
     <div className="space-y">
+      <div className="card">
+        <div className="card-content flex justify-between gap items-center" style={{ flexWrap: 'wrap' }}>
+          <div>
+            <h2>Calendar / Annual Leave</h2>
+            <p className="small muted">
+              Apply annual leave, view leave calendar, and manage approvals. Approved leave is deducted from the 28-day allowance.
+            </p>
+          </div>
+          <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ maxWidth: 180 }} />
+        </div>
+      </div>
+
       <div className="grid grid-3">
         <Insight
           title="Annual Leave Remaining"
@@ -1184,6 +1244,13 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
         <div className="card">
           <div className="card-content space-y-sm">
             <h2>Apply Annual Leave</h2>
+
+            {leaveError && (
+              <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>
+                {leaveError}
+              </div>
+            )}
+
             <div className="grid grid-2">
               <Field label="Start Date" type="date" value={leaveForm.startDate} onChange={v => setLeaveForm(p => ({ ...p, startDate: v }))} />
               <Field label="End Date" type="date" value={leaveForm.endDate} onChange={v => setLeaveForm(p => ({ ...p, endDate: v }))} />
@@ -1195,6 +1262,9 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
                 <option value="full">Full day</option>
                 <option value="half">Half day</option>
               </select>
+              <p className="xsmall muted" style={{ marginTop: 6 }}>
+                Selected request: {calculateLeaveDays(leaveForm)} day(s). Weekends are not deducted.
+              </p>
             </div>
 
             <div>
@@ -1208,9 +1278,11 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
 
         <div className="card">
           <div className="card-content">
-            <div className="flex justify-between items-center" style={{ marginBottom: 12 }}>
-              <h2>Calendar</h2>
-              <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ maxWidth: 180 }} />
+            <div className="flex justify-between items-center" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <h2>{monthLabel}</h2>
+                <p className="small muted">Calendar starts Monday. Approved, submitted and rejected leave are shown here.</p>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6 }}>
@@ -1221,15 +1293,31 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
               {blanks.map((_, i) => <div key={`blank-${i}`} />)}
               {days.map(day => {
                 const items = requestsForDate(day);
+                const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+
                 return (
-                  <div key={day.toISOString()} style={{ minHeight: 90, background: '#f8fafc', borderRadius: 12, padding: 8 }}>
-                    <b>{day.getDate()}</b>
+                  <div
+                    key={day.toISOString()}
+                    style={{
+                      minHeight: 96,
+                      background: isWeekend ? '#f1f5f9' : '#f8fafc',
+                      borderRadius: 12,
+                      padding: 8,
+                      border: items.length ? '1px solid #cbd5e1' : '1px solid transparent'
+                    }}
+                  >
+                    <div className="flex justify-between items-center">
+                      <b>{day.getDate()}</b>
+                      {isWeekend && <span className="xsmall muted">Weekend</span>}
+                    </div>
+
                     <div className="space-y-sm" style={{ marginTop: 6 }}>
-                      {items.slice(0, 2).map(item => (
-                        <div key={item.id} className={`badge ${item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
-                          {item.employeeName} {item.duration === 'half' ? '½' : 'AL'}
+                      {items.slice(0, 3).map(item => (
+                        <div key={item.id} className={`badge ${item.status}`} style={{ display: 'block', whiteSpace: 'normal', lineHeight: 1.25 }}>
+                          {item.employeeName} · {item.duration === 'half' ? '½ day' : 'AL'} · {item.status}
                         </div>
                       ))}
+                      {items.length > 3 && <span className="xsmall muted">+{items.length - 3} more</span>}
                     </div>
                   </div>
                 );
@@ -1285,6 +1373,7 @@ function CalendarLeavePage({ activeUser, leaveRequests, submitLeaveRequest, upda
     </div>
   );
 }
+
 
 function ExpenseForm(p) {
   return (
