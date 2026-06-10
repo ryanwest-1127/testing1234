@@ -111,6 +111,19 @@ function weekLabel(week) {
   return `Week ${weekNumber}, ${year}`;
 }
 
+function currentMonthValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabel(monthValue) {
+  const match = String(monthValue || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return monthValue || 'No month';
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, 1)
+    .toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
 function defaultTimesheet() {
   return Object.fromEntries(
     weekDays.map(day => [
@@ -293,8 +306,21 @@ function claimTypeOf(claim) {
   return claim.type || (claim.expenses ? 'expense' : 'timesheet');
 }
 
+function claimPeriodKey(claim) {
+  return claimTypeOf(claim) === 'expense'
+    ? claim.expenseMonth || claim.month || claim.week || ''
+    : claim.week || '';
+}
+
+function getClaimExpenseMonth(claim) {
+  return claim.expenseMonth ||
+    claim.month ||
+    claim.expenses?.find(expense => expense.date)?.date?.slice(0, 7) ||
+    currentMonthValue();
+}
+
 function claimUniqueKey(claim) {
-  return `${claim.employeeId || ''}|${claim.week || ''}|${claimTypeOf(claim)}`;
+  return `${claim.employeeId || ''}|${claimPeriodKey(claim)}|${claimTypeOf(claim)}`;
 }
 
 function uniqueClaimsByEmployeeWeekType(claims) {
@@ -316,7 +342,7 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
   const timesheetClaims = cleanClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
   const expenseClaims = cleanClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
 
-  const weekOptions = Array.from(new Set(cleanClaims.map(c => c.week).filter(Boolean))).sort();
+  const weekOptions = Array.from(new Set(timesheetClaims.map(c => c.week).filter(Boolean))).sort();
   const latestSubmittedWeek = weekOptions.length ? weekOptions[weekOptions.length - 1] : selectedWeek;
 
   const selectedWeekOnly = selectedWeek || latestSubmittedWeek;
@@ -391,6 +417,7 @@ export default function App() {
   const [alError, setAlError] = useState('');
   const [alMonth, setAlMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedWeek, setSelectedWeek] = useState('2026-W21');
+  const [selectedExpenseMonth, setSelectedExpenseMonth] = useState(currentMonthValue());
 
   const [employeeInfo, setEmployeeInfo] = useState({
     employeeId: 'EMP001',
@@ -485,9 +512,10 @@ export default function App() {
 
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
+    const periodText = c.periodLabel || c.expenseMonth || c.weekLabel || c.week || '';
 
     return (
-      (!search || `${c.employeeName} ${c.email} ${c.week}`.toLowerCase().includes(search.toLowerCase())) &&
+      (!search || `${c.employeeName} ${c.email} ${periodText}`.toLowerCase().includes(search.toLowerCase())) &&
       (historyTypeFilter === 'All' || claimType === historyTypeFilter)
     );
   });
@@ -586,6 +614,10 @@ export default function App() {
   const buildExpenseClaim = status => ({
     ...commonClaimFields(status),
     type: 'expense',
+    week: '',
+    weekLabel: '',
+    expenseMonth: selectedExpenseMonth || currentMonthValue(),
+    periodLabel: monthLabel(selectedExpenseMonth || currentMonthValue()),
     expenses,
     totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
   });
@@ -632,6 +664,9 @@ export default function App() {
     });
     if (claim.standardHours) setStandardHours(String(claim.standardHours));
     if (claim.week) setSelectedWeek(claim.week);
+    if (claimTypeOf(claim) === 'expense') {
+      setSelectedExpenseMonth(getClaimExpenseMonth(claim));
+    }
     setEditingClaimId(claim.id);
     setEditingOriginalClaim(claim);
     setTab(claim.type === 'expense' ? 'expense' : 'timesheet');
@@ -655,8 +690,10 @@ export default function App() {
         employeeName: employeeInfo.employeeName,
         email: employeeInfo.email,
         department: selectedEmployee?.department || editingOriginalClaim.department || 'Production',
-        week: selectedWeek,
-        weekLabel: weekLabel(selectedWeek),
+        week: '',
+        weekLabel: '',
+        expenseMonth: selectedExpenseMonth || currentMonthValue(),
+        periodLabel: monthLabel(selectedExpenseMonth || currentMonthValue()),
         expenses,
         totals: { totalExpense: expenseTotal, totalVAT: vatTotal },
         notes: employeeInfo.notes,
@@ -696,7 +733,7 @@ export default function App() {
 
         return !(
           c.employeeId === updatedClaim.employeeId &&
-          c.week === updatedClaim.week &&
+          claimPeriodKey(c) === claimPeriodKey(updatedClaim) &&
           type === updatedType
         );
       });
@@ -727,7 +764,7 @@ export default function App() {
       const existingIndex = prev.findIndex(c => {
         const existingType = c.type || (c.expenses ? 'expense' : 'timesheet');
         return c.employeeId === newClaim.employeeId &&
-          c.week === newClaim.week &&
+          claimPeriodKey(c) === claimPeriodKey(newClaim) &&
           existingType === newType;
       });
 
@@ -992,8 +1029,8 @@ export default function App() {
               setClaimEmployee,
               employees,
               activeUser,
-              selectedWeek,
-              setSelectedWeek,
+              selectedExpenseMonth,
+              setSelectedExpenseMonth,
               totals,
               expenses,
               setExpenses,
@@ -1188,7 +1225,7 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
   const timesheetClaims = cleanVisibleClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
   const expenseClaims = cleanVisibleClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
 
-  const weekOptions = Array.from(new Set(cleanVisibleClaims.map(c => c.week).filter(Boolean))).sort().reverse();
+  const weekOptions = Array.from(new Set(timesheetClaims.map(c => c.week).filter(Boolean))).sort().reverse();
   const latestSubmittedWeek = weekOptions.length ? weekOptions[0] : selectedWeek;
   const selectedWeekOnly = dashboardWeek === 'current' ? (selectedWeek || latestSubmittedWeek) : dashboardWeek;
   const weekOnlyTimesheetClaims = timesheetClaims.filter(c => c.week === selectedWeekOnly);
@@ -1901,8 +1938,13 @@ function ExpenseForm(p) {
             )}
           </div>
           <div>
-            <label className="label">Week</label>
-            <BusinessWeekPicker value={p.selectedWeek} onChange={p.setSelectedWeek} />
+            <label className="label">Month</label>
+            <input
+              className="input"
+              type="month"
+              value={p.selectedExpenseMonth}
+              onChange={ev => p.setSelectedExpenseMonth(ev.target.value)}
+            />
           </div>
           <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
           <Mini label="Current VAT Total" value={money(currentVATTotal)} />
@@ -2063,7 +2105,7 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
       <div className="card-content flex gap" style={{ flexWrap: 'wrap' }}>
         <div className="flex items-center gap" style={{ flex: 1 }}>
           <Search size={16} />
-          <input className="input" placeholder="Search employee, email or week..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input className="input" placeholder="Search employee, email, week or month..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
         <select
@@ -2107,7 +2149,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
               <div className="flex justify-between gap" style={{ flexWrap: 'wrap' }}>
                 <div>
                   <h3>
-                    {c.employeeName} — {c.weekLabel || c.week}
+                    {c.employeeName} — {isExpense ? (c.periodLabel || monthLabel(getClaimExpenseMonth(c))) : (c.weekLabel || c.week)}
                     {' '}
                     <span className="badge">{isExpense ? 'Expense' : 'Timesheet'}</span>
                     {' '}
