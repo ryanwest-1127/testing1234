@@ -262,6 +262,28 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours) {
 }
 
 
+
+function sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek) {
+  const weekDates = getWeekDates(selectedWeek);
+  const cleaned = { ...timesheet };
+
+  weekDays.forEach((day, index) => {
+    if (weekDates[index]?.inYear === false) {
+      cleaned[day] = {
+        ...cleaned[day],
+        projectName: '',
+        projectHours: '',
+        travelHours: '',
+        holidayType: 'none',
+        takeBackTimeInLieu: '',
+        sickness: false
+      };
+    }
+  });
+
+  return cleaned;
+}
+
 function tabLabel(tab) {
   if (tab === 'timesheet') return 'Timesheet';
   if (tab === 'expense') return 'Expense';
@@ -384,23 +406,28 @@ export default function App() {
     managerNote: ''
   });
 
-  const buildTimesheetClaim = status => ({
-    ...commonClaimFields(status),
-    type: 'timesheet',
-    timesheet,
-    timeInLieu,
-    standardHours,
-    totals: {
-      projectHours: totals.projectHours,
-      travelHours: totals.travelHours,
-      holiday: totals.holiday,
-      takeBackTimeInLieu: totals.takeBackTimeInLieu,
-      sickness: totals.sickness,
-      timeInLieu: totals.timeInLieu,
-      totalWorkingHours: totals.totalWorkingHours,
-      tilBalance: totals.tilBalance
-    }
-  });
+  const buildTimesheetClaim = status => {
+    const cleanedTimesheet = sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek);
+    const cleanedTotals = calculateTotals(cleanedTimesheet, expenses, timeInLieu, standardHours);
+
+    return {
+      ...commonClaimFields(status),
+      type: 'timesheet',
+      timesheet: cleanedTimesheet,
+      timeInLieu,
+      standardHours,
+      totals: {
+        projectHours: cleanedTotals.projectHours,
+        travelHours: cleanedTotals.travelHours,
+        holiday: cleanedTotals.holiday,
+        takeBackTimeInLieu: cleanedTotals.takeBackTimeInLieu,
+        sickness: cleanedTotals.sickness,
+        timeInLieu: cleanedTotals.timeInLieu,
+        totalWorkingHours: cleanedTotals.totalWorkingHours,
+        tilBalance: cleanedTotals.tilBalance
+      }
+    };
+  };
 
   const buildExpenseClaim = status => ({
     ...commonClaimFields(status),
@@ -469,13 +496,16 @@ export default function App() {
         };
       }
 
+      const cleanedTimesheet = sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek);
+      const cleanedTotals = calculateTotals(cleanedTimesheet, expenses, timeInLieu, standardHours);
+
       return {
         ...c,
         week: selectedWeek,
-        timesheet,
+        timesheet: cleanedTimesheet,
         timeInLieu,
         standardHours,
-        totals: updatedTotals,
+        totals: cleanedTotals,
         status: c.status || 'Submitted',
         editedAt: new Date().toLocaleString('en-GB')
       };
@@ -1091,25 +1121,27 @@ function TimesheetForm(p) {
               <tbody>
                 {weekDays.map((day, dayIndex) => {
                   const row = p.timesheet[day];
+                  const dateInfo = weekDates[dayIndex];
+                  const isLockedOutsideYear = dateInfo && dateInfo.inYear === false;
                   const dailyHours = Number(p.standardHours || 7.5);
                   const holidayType = row.holidayType || 'none';
                   const sicknessSelected = row.sickness === true;
                   const takeBackHours = Number(row.takeBackTimeInLieu || 0);
                   const leaveSelected = holidayType === 'half' || holidayType === 'full' || sicknessSelected;
 
-                  const workedHours = leaveSelected
+                  const workedHours = leaveSelected || isLockedOutsideYear
                     ? 0
                     : Number(row.projectHours || 0) +
                       Number(row.travelHours || 0);
 
-                  const holidayHours =
+                  const holidayHours = isLockedOutsideYear ? 0 :
                     holidayType === 'full' ? dailyHours :
                     holidayType === 'half' ? dailyHours / 2 :
                     0;
 
-                  const sicknessHours = sicknessSelected ? dailyHours : 0;
-                  const autoTimeInLieu = leaveSelected ? 0 : Math.max(0, workedHours - dailyHours);
-                  const total = leaveSelected ? holidayHours + sicknessHours : workedHours + takeBackHours;
+                  const sicknessHours = isLockedOutsideYear ? 0 : (sicknessSelected ? dailyHours : 0);
+                  const autoTimeInLieu = leaveSelected || isLockedOutsideYear ? 0 : Math.max(0, workedHours - dailyHours);
+                  const total = isLockedOutsideYear ? 0 : (leaveSelected ? holidayHours + sicknessHours : workedHours + takeBackHours);
 
                   const clearWorkingInputs = () => {
                     p.updateTimesheet(day, 'projectName', '');
@@ -1118,6 +1150,7 @@ function TimesheetForm(p) {
                   };
 
                   const setHoliday = (type) => {
+                    if (isLockedOutsideYear) return;
                     const nextType = holidayType === type ? 'none' : type;
                     p.updateTimesheet(day, 'holidayType', nextType);
                     p.updateTimesheet(day, 'sickness', false);
@@ -1125,6 +1158,7 @@ function TimesheetForm(p) {
                   };
 
                   const setSickness = () => {
+                    if (isLockedOutsideYear) return;
                     const nextValue = !sicknessSelected;
                     p.updateTimesheet(day, 'sickness', nextValue);
                     p.updateTimesheet(day, 'holidayType', 'none');
@@ -1132,8 +1166,8 @@ function TimesheetForm(p) {
                   };
 
                   return (
-                    <tr key={day}>
-                      <td><b>{day}</b><br /><span className="xsmall muted">{getDateForWeekDay(p.selectedWeek, dayIndex)}</span></td>
+                    <tr key={day} style={isLockedOutsideYear ? { opacity: 0.55, background: '#f8fafc' } : undefined}>
+                      <td><b>{day}</b><br /><span className="xsmall muted">{dateInfo?.label || "Outside year"}</span>{isLockedOutsideYear && <><br /><span className="xsmall muted">Locked</span></>}</td>
 
                       <td>
                         <input
@@ -1141,7 +1175,7 @@ function TimesheetForm(p) {
                           type="text"
                           placeholder={leaveSelected ? 'Locked - leave/sickness selected' : 'Project / Job name'}
                           value={row.projectName || ''}
-                          disabled={leaveSelected}
+                          disabled={leaveSelected || isLockedOutsideYear}
                           onChange={e => p.updateTimesheet(day, 'projectName', e.target.value)}
                         />
                       </td>
@@ -1153,7 +1187,7 @@ function TimesheetForm(p) {
                           min="0"
                           step="0.25"
                           value={row.projectHours}
-                          disabled={leaveSelected}
+                          disabled={leaveSelected || isLockedOutsideYear}
                           onChange={e => p.updateTimesheet(day, 'projectHours', e.target.value)}
                         />
                       </td>
@@ -1165,7 +1199,7 @@ function TimesheetForm(p) {
                           min="0"
                           step="0.25"
                           value={row.travelHours}
-                          disabled={leaveSelected}
+                          disabled={leaveSelected || isLockedOutsideYear}
                           onChange={e => p.updateTimesheet(day, 'travelHours', e.target.value)}
                         />
                       </td>
@@ -1180,6 +1214,7 @@ function TimesheetForm(p) {
                           min="0"
                           step="0.25"
                           value={row.takeBackTimeInLieu || ''}
+                          disabled={isLockedOutsideYear}
                           onChange={e => p.updateTimesheet(day, 'takeBackTimeInLieu', e.target.value)}
                         />
                       </td>
@@ -1190,6 +1225,7 @@ function TimesheetForm(p) {
                             <input
                               type="checkbox"
                               checked={holidayType === 'half'}
+                              disabled={isLockedOutsideYear}
                               onChange={() => setHoliday('half')}
                             />
                             Half ({(dailyHours / 2).toFixed(2)}h)
@@ -1198,6 +1234,7 @@ function TimesheetForm(p) {
                             <input
                               type="checkbox"
                               checked={holidayType === 'full'}
+                              disabled={isLockedOutsideYear}
                               onChange={() => setHoliday('full')}
                             />
                             Full ({dailyHours.toFixed(2)}h)
@@ -1210,6 +1247,7 @@ function TimesheetForm(p) {
                           <input
                             type="checkbox"
                             checked={sicknessSelected}
+                            disabled={isLockedOutsideYear}
                             onChange={setSickness}
                           />
                           Sick ({dailyHours.toFixed(2)}h)
