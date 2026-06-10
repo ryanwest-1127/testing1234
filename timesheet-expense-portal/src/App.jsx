@@ -1144,6 +1144,20 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
       return sum + Number(row.takeBackTimeInLieu || 0);
     }, 0);
 
+    const leaveHours = weekOnlyTimesheetClaims.reduce((sum, claim) => {
+      const row = claim.timesheet?.[day] || {};
+      const standardHours = Number(claim.standardHours || dailyStandardHours);
+      const holidayType = row.holidayType || 'none';
+      const holidayHours = holidayType === 'full'
+        ? standardHours
+        : holidayType === 'half'
+          ? standardHours / 2
+          : 0;
+      const sicknessHours = row.sickness ? standardHours : 0;
+      return sum + holidayHours + sicknessHours;
+    }, 0);
+
+    const paidLeaveAndTakeBack = leaveHours + takeBackTimeInLieu;
     const totalWorked = projectHours + travelHours;
     const standardProject = Math.min(projectHours, dailyStandardHours);
     const remainingStandardAfterProject = Math.max(0, dailyStandardHours - standardProject);
@@ -1154,9 +1168,9 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
       day: `${day.slice(0, 3)} ${weekDateLabels[index]?.label || ''}`,
       project: standardProject,
       travel: standardTravel,
-      takeBackTimeInLieu,
+      paidLeaveAndTakeBack,
       timeInLieu,
-      total: totalWorked + takeBackTimeInLieu
+      total: totalWorked + paidLeaveAndTakeBack
     };
   });
 
@@ -1231,7 +1245,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         />
       </div>
 
-      <ChartCard title="Daily Hours Breakdown vs 7.5h Standard" sub="Project / Workshop, Travel, Take back TIL and Time in Lieu are shown separately.">
+      <ChartCard title="Daily Hours Breakdown vs 7.5h Standard" sub="Project / Workshop, Travel, AL / SL / Take back TIL and Time in Lieu are shown separately.">
         {dailyHoursData.every(item => item.total === 0) ? (
           <div className="muted" style={{ padding: 24 }}>No timesheet data for this week yet.</div>
         ) : (
@@ -1247,15 +1261,15 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
                     ? 'Project / Workshop'
                     : name === 'travel'
                       ? 'Travel'
-                      : name === 'takeBackTimeInLieu'
-                        ? 'Take back TIL'
+                      : name === 'paidLeaveAndTakeBack'
+                        ? 'AL / SL / Take back TIL'
                         : 'Time in Lieu'
                 ]}
                 labelFormatter={(label) => `${label}`}
               />
               <Bar dataKey="project" stackId="hours" fill="#2563eb" radius={[6, 6, 0, 0]} />
               <Bar dataKey="travel" stackId="hours" fill="#16a34a" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="takeBackTimeInLieu" stackId="hours" fill="#eab308" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="paidLeaveAndTakeBack" stackId="hours" fill="#eab308" radius={[6, 6, 0, 0]} />
               <Bar dataKey="timeInLieu" stackId="hours" fill="#dc2626" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -1264,7 +1278,7 @@ function Dashboard({ visibleClaims, categoryData, totals, weeklyStandardHours, s
         <div className="flex gap items-center" style={{ marginTop: 12, flexWrap: 'wrap' }}>
           <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#2563eb', borderRadius: 3, marginRight: 6 }} />Project / Workshop</span>
           <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#16a34a', borderRadius: 3, marginRight: 6 }} />Travel</span>
-          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#eab308', borderRadius: 3, marginRight: 6 }} />Take back TIL</span>
+          <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#eab308', borderRadius: 3, marginRight: 6 }} />AL / SL / Take back TIL</span>
           <span className="small muted"><span style={{ display: 'inline-block', width: 12, height: 12, background: '#dc2626', borderRadius: 3, marginRight: 6 }} />Time in Lieu over 7.5h</span>
         </div>
       </ChartCard>
