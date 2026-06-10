@@ -2016,7 +2016,7 @@ function ExpenseForm(p) {
           <h2>{p.editingClaimId ? 'Save Expense Changes' : 'Ready to Submit Expense'}</h2>
           <p className="small muted">
             {p.editingClaimId
-              ? 'This updates the existing expense record for the selected employee, week and claim type.'
+              ? 'This updates the existing expense record for the selected employee, month and claim type.'
               : 'This will submit expense only. It is no longer linked to the weekly timesheet.'}
           </p>
 
