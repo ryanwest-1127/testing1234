@@ -373,6 +373,7 @@ function tabLabel(tab) {
 export default function App() {
   const [tab, setTab] = useState('dashboard');
   const [activeUser, setActiveUser] = useState(employees[0]);
+  const [viewEmployeeId, setViewEmployeeId] = useState('All');
   const [claims, setClaims] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [alForm, setAlForm] = useState({ startDate: '', endDate: '', duration: 'full', reason: '' });
@@ -411,11 +412,18 @@ export default function App() {
   }, [claims, leaveRequests]);
 
   useEffect(() => {
-    const user = activeUser.role === 'Manager' ? employees[0] : activeUser;
+    const defaultEmployee = activeUser.role === 'Manager'
+      ? employees.find(e => e.role !== 'Manager') || activeUser
+      : activeUser;
+
+    if (activeUser.role !== 'Manager') {
+      setViewEmployeeId(activeUser.id);
+    }
+
     setEmployeeInfo({
-      employeeId: user.id,
-      employeeName: user.name,
-      email: user.email,
+      employeeId: defaultEmployee.id,
+      employeeName: defaultEmployee.name,
+      email: defaultEmployee.email,
       notes: ''
     });
   }, [activeUser]);
@@ -430,17 +438,32 @@ export default function App() {
     [expenses]
   );
 
-  const dashboardSummary = useMemo(
-    () => getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests),
-    [claims, selectedWeek, weeklyStandardHours, leaveRequests]
-  );
-
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
 
-  const visibleClaims =
+  const accountClaims =
     activeUser.role === 'Manager'
       ? cleanClaims
-      : cleanClaims.filter(c => c.employeeId === employeeInfo.employeeId);
+      : cleanClaims.filter(c => c.employeeId === activeUser.id);
+
+  const visibleClaims =
+    activeUser.role === 'Manager' && viewEmployeeId !== 'All'
+      ? accountClaims.filter(c => c.employeeId === viewEmployeeId)
+      : accountClaims;
+
+  const accountLeaveRequests =
+    activeUser.role === 'Manager'
+      ? leaveRequests
+      : leaveRequests.filter(r => r.employeeId === activeUser.id);
+
+  const summaryLeaveRequests =
+    activeUser.role === 'Manager' && viewEmployeeId !== 'All'
+      ? accountLeaveRequests.filter(r => r.employeeId === viewEmployeeId)
+      : accountLeaveRequests;
+
+  const dashboardSummary = useMemo(
+    () => getDashboardSummary(visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests),
+    [visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests]
+  );
 
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
@@ -461,7 +484,17 @@ export default function App() {
     );
 
   const categoryData = Object.entries(categoryMap).map(([name, value]) => ({ name, value }));
-  const pending = cleanClaims.filter(c => c.status === 'Submitted').length;
+  const pending = visibleClaims.filter(c => c.status === 'Submitted').length;
+
+  const setClaimEmployee = (employeeId) => {
+    const employee = employees.find(e => e.id === employeeId) || employees[0];
+    setEmployeeInfo(prev => ({
+      ...prev,
+      employeeId: employee.id,
+      employeeName: employee.name,
+      email: employee.email
+    }));
+  };
 
   const updateTimesheet = (day, field, value) => {
     setTimesheet(prev => ({
@@ -797,19 +830,37 @@ export default function App() {
               </p>
             </div>
 
-            <div>
-              <label className="label" style={{ color: '#cbd5e1' }}>Demo user</label>
-              <select
-                className="select"
-                value={activeUser.id}
-                onChange={e => setActiveUser(employees.find(u => u.id === e.target.value))}
-              >
-                {employees.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} — {u.role}
-                  </option>
-                ))}
-              </select>
+            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+              <div>
+                <label className="label" style={{ color: '#cbd5e1' }}>Account</label>
+                <select
+                  className="select"
+                  value={activeUser.id}
+                  onChange={e => setActiveUser(employees.find(u => u.id === e.target.value))}
+                >
+                  {employees.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} — {u.role}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {activeUser.role === 'Manager' && (
+                <div>
+                  <label className="label" style={{ color: '#cbd5e1' }}>View data</label>
+                  <select
+                    className="select"
+                    value={viewEmployeeId}
+                    onChange={e => setViewEmployeeId(e.target.value)}
+                  >
+                    <option value="All">All Employees</option>
+                    {employees.filter(u => u.role !== 'Manager').map(u => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
         </motion.header>
@@ -871,6 +922,9 @@ export default function App() {
             {...{
               employeeInfo,
               setEmployeeInfo,
+              setClaimEmployee,
+              employees,
+              activeUser,
               selectedWeek,
               setSelectedWeek,
               timesheet,
@@ -895,6 +949,9 @@ export default function App() {
           <ExpenseForm
             {...{
               employeeInfo,
+              setClaimEmployee,
+              employees,
+              activeUser,
               selectedWeek,
               totals,
               expenses,
@@ -1492,9 +1549,20 @@ function TimesheetForm(p) {
     <div className="space-y">
       <div className="card">
         <div className="card-content grid grid-4">
-          <Field label="Employee Name" value={p.employeeInfo.employeeName} onChange={v => p.setEmployeeInfo({ ...p.employeeInfo, employeeName: v })} />
-          <Field label="Email" value={p.employeeInfo.email} onChange={v => p.setEmployeeInfo({ ...p.employeeInfo, email: v })} />
-          <Field label="Employee ID" value={p.employeeInfo.employeeId} onChange={v => p.setEmployeeInfo({ ...p.employeeInfo, employeeId: v })} />
+          <div>
+            <label className="label">Employee</label>
+            {p.activeUser?.role === 'Manager' ? (
+              <select className="select" value={p.employeeInfo.employeeId} onChange={e => p.setClaimEmployee(e.target.value)}>
+                {p.employees.filter(u => u.role !== 'Manager').map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input className="input" value={p.employeeInfo.employeeName} disabled readOnly />
+            )}
+          </div>
+          <ReadOnlyField label="Email" value={p.employeeInfo.email} />
+          <ReadOnlyField label="Employee ID" value={p.employeeInfo.employeeId} />
           <div>
             <label className="label">Week</label>
             <BusinessWeekPicker value={p.selectedWeek} onChange={p.setSelectedWeek} />
@@ -1705,7 +1773,18 @@ function ExpenseForm(p) {
     <div className="space-y">
       <div className="card">
         <div className="card-content grid grid-3">
-          <Mini label="Employee" value={p.employeeInfo.employeeName} />
+          <div>
+            <label className="label">Employee</label>
+            {p.activeUser?.role === 'Manager' ? (
+              <select className="select" value={p.employeeInfo.employeeId} onChange={e => p.setClaimEmployee(e.target.value)}>
+                {p.employees.filter(u => u.role !== 'Manager').map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input className="input" value={p.employeeInfo.employeeName} disabled readOnly />
+            )}
+          </div>
           <Mini label="Week" value={weekLabel(p.selectedWeek)} />
           <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
         </div>
