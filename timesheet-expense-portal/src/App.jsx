@@ -1027,6 +1027,8 @@ export default function App() {
             allEmployeeClaims={accountClaims}
             allLeaveRequests={accountLeaveRequests}
             employees={employees}
+            viewEmployeeId={viewEmployeeId}
+            setViewEmployeeId={setViewEmployeeId}
             weeklyStandardHours={weeklyStandardHours}
             setWeeklyStandardHours={setWeeklyStandardHours}
             activeUser={activeUser}
@@ -1289,6 +1291,8 @@ function Dashboard({
   allEmployeeClaims,
   allLeaveRequests,
   employees,
+  viewEmployeeId,
+  setViewEmployeeId,
   weeklyStandardHours,
   setWeeklyStandardHours,
   activeUser,
@@ -1356,6 +1360,15 @@ function Dashboard({
           };
         })
     : [];
+
+  const selectedBossEmployee = activeUser?.role === 'Manager' && viewEmployeeId !== 'All'
+    ? bossEmployeeSummaries.find(employee => employee.id === viewEmployeeId)
+    : null;
+
+  const viewEmployeeProfile = (employeeId) => {
+    setViewEmployeeId(employeeId);
+    setDashboardWeek('current');
+  };
 
   const targetHours = Number(weeklyStandardHours || 0);
 
@@ -1452,11 +1465,12 @@ function Dashboard({
                     <th>TIL Remaining</th>
                     <th>Total Expense</th>
                     <th>Pending</th>
+                    <th>Profile</th>
                   </tr>
                 </thead>
                 <tbody>
                   {bossEmployeeSummaries.map(({ summary, ...employee }) => (
-                    <tr key={employee.id}>
+                    <tr key={employee.id} style={viewEmployeeId === employee.id ? { background: '#dbeafe' } : undefined}>
                       <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
                       <td>{employee.department}</td>
                       <td>{Number(summary.totalWorkingHours || 0).toFixed(2)} / {Number(summary.targetHours || 0).toFixed(2)} hrs</td>
@@ -1464,8 +1478,68 @@ function Dashboard({
                       <td>{Number(summary.timeInLieuRemaining || 0).toFixed(2)} hrs</td>
                       <td>{money(summary.outstandingExpenses)}</td>
                       <td><span className={`badge ${summary.pendingApproval ? 'Submitted' : ''}`}>{summary.pendingApproval}</span></td>
+                      <td>
+                        <button className="btn secondary" type="button" onClick={() => viewEmployeeProfile(employee.id)}>
+                          View Profile
+                        </button>
+                      </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedBossEmployee && (
+        <div className="card">
+          <div className="card-content space-y-sm">
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Employee Profile</p>
+                <h2>{selectedBossEmployee.name}</h2>
+                <p className="small muted">{selectedBossEmployee.email} · {selectedBossEmployee.department}</p>
+              </div>
+              <button className="btn secondary" type="button" onClick={() => setViewEmployeeId('All')}>
+                Back to All Employees
+              </button>
+            </div>
+
+            <div className="grid grid-4">
+              <Mini label="Current Week Hours" value={`${Number(selectedBossEmployee.summary.totalWorkingHours || 0).toFixed(2)} / ${Number(selectedBossEmployee.summary.targetHours || 0).toFixed(2)} hrs`} />
+              <Mini label="AL Remaining" value={`${selectedBossEmployee.summary.annualLeaveRemaining} / ${selectedBossEmployee.summary.annualLeaveTotal} days`} />
+              <Mini label="TIL Remaining" value={`${Number(selectedBossEmployee.summary.timeInLieuRemaining || 0).toFixed(2)} hrs`} />
+              <Mini label="Total Expense" value={money(selectedBossEmployee.summary.outstandingExpenses)} />
+            </div>
+
+            <div className="wide">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Period</th>
+                    <th>Status</th>
+                    <th>Summary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cleanVisibleClaims.slice(0, 6).map(claim => {
+                    const isExpense = claimTypeOf(claim) === 'expense';
+                    return (
+                      <tr key={claim.id}>
+                        <td>{isExpense ? 'Expense' : 'Timesheet'}</td>
+                        <td>{isExpense ? (claim.periodLabel || monthLabel(getClaimExpenseMonth(claim))) : (claim.weekLabel || claim.week)}</td>
+                        <td><span className={`badge ${claim.status}`}>{claim.status}</span></td>
+                        <td>{isExpense ? money(claim.totals?.totalExpense) : `${Number(claim.totals?.totalWorkingHours || 0).toFixed(2)} hrs`}</td>
+                      </tr>
+                    );
+                  })}
+                  {cleanVisibleClaims.length === 0 && (
+                    <tr>
+                      <td colSpan="4" className="muted">No saved records for this employee yet.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
