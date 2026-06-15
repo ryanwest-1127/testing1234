@@ -1404,9 +1404,14 @@ function Dashboard({
     ? (allLeaveRequests || []).filter(request => request.employeeId === selectedBossEmployee.id)
     : [];
 
+  const selectedEmployeeClaims = selectedBossEmployee
+    ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || [])
+        .filter(claim => claim.employeeId === selectedBossEmployee.id)
+    : [];
+
   const selectedEmployeeApplications = selectedBossEmployee
     ? [
-        ...cleanVisibleClaims.map(claim => ({
+        ...selectedEmployeeClaims.map(claim => ({
           id: claim.id,
           type: claimTypeOf(claim) === 'expense' ? 'Expense' : 'Timesheet',
           period: claimTypeOf(claim) === 'expense'
@@ -1426,7 +1431,7 @@ function Dashboard({
           summary: `${calculateLeaveDays(request)} day(s)`,
           source: 'leave'
         }))
-      ]
+      ].sort((a, b) => String(b.period || '').localeCompare(String(a.period || '')))
     : [];
 
   const approveApplication = (application) => {
@@ -1633,6 +1638,7 @@ function Dashboard({
                 <p className="small muted">Employee Profile</p>
                 <h2>{selectedBossEmployee.name}</h2>
                 <p className="small muted">{selectedBossEmployee.email} · {selectedBossEmployee.department}</p>
+                <p className="xsmall muted">{selectedEmployeeApplications.length} saved application(s)</p>
               </div>
               <button className="btn secondary" type="button" onClick={() => setViewEmployeeId('All')}>
                 Back to All Employees
