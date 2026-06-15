@@ -337,6 +337,48 @@ function uniqueClaimsByEmployeeWeekType(claims) {
   return result;
 }
 
+function sanitizeFilenamePart(value) {
+  return String(value || 'receipt')
+    .trim()
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/^-+|-+$/g, '') || 'receipt';
+}
+
+function receiptDownloadItemsFromClaims(claims) {
+  return uniqueClaimsByEmployeeWeekType(claims || [])
+    .filter(claim => claimTypeOf(claim) === 'expense')
+    .flatMap(claim => (claim.expenses || [])
+      .filter(expense => expense.receiptName && expense.receiptPreview)
+      .map((expense, index) => {
+        const period = claim.periodLabel || monthLabel(getClaimExpenseMonth(claim));
+        const nameParts = [
+          sanitizeFilenamePart(claim.employeeName),
+          sanitizeFilenamePart(period),
+          sanitizeFilenamePart(expense.category || 'Expense'),
+          String(index + 1).padStart(2, '0'),
+          sanitizeFilenamePart(expense.receiptName)
+        ];
+
+        return {
+          href: expense.receiptPreview,
+          filename: nameParts.join('_')
+        };
+      }));
+}
+
+function downloadReceiptItems(items) {
+  (items || []).forEach((item, index) => {
+    window.setTimeout(() => {
+      const link = document.createElement('a');
+      link.href = item.href;
+      link.download = item.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }, index * 150);
+  });
+}
+
 function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const timesheetClaims = cleanClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
@@ -1411,6 +1453,7 @@ function Dashboard({
     }))
     .filter(item => item.value > 0);
   const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#64748b'];
+  const companyReceiptItems = receiptDownloadItemsFromClaims(companyExpenseClaims);
 
   const bossEmployeeSummaries = isManager
     ? employees
@@ -1491,6 +1534,7 @@ function Dashboard({
     ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || [])
         .filter(claim => claim.employeeId === selectedBossEmployee.id)
     : [];
+  const selectedEmployeeReceiptItems = receiptDownloadItemsFromClaims(selectedEmployeeClaims);
 
   const selectedEmployeeApplications = selectedBossEmployee
     ? [
@@ -1684,13 +1728,23 @@ function Dashboard({
       {isManager && managerDashboardView === 'overall' && (
         <div className="card">
           <div className="card-content">
-            <div>
-              <p className="small muted">Overall Dashboard</p>
-              <h2>All Employees Summary</h2>
-              <p className="small muted">Overall employee status, expense totals and application workload.</p>
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Overall Dashboard</p>
+                <h2>All Employees Summary</h2>
+                <p className="small muted">Overall employee status, expense totals and application workload.</p>
+              </div>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={companyReceiptItems.length === 0}
+                onClick={() => downloadReceiptItems(companyReceiptItems)}
+              >
+                Download All Receipts ({companyReceiptItems.length})
+              </button>
             </div>
 
-            <div className="grid grid-4">
+            <div className="grid grid-4" style={{ marginTop: 14 }}>
               <Mini label="Company Expense Total" value={money(companyExpenseTotal)} />
               <Mini label="All Expense Claims" value={money(companyExpenseGross)} />
               <Mini label="Approved / Paid" value={money(companyExpenseApprovedPaid)} />
@@ -1876,6 +1930,14 @@ function Dashboard({
               </div>
               <button className="btn secondary" type="button" onClick={() => setViewEmployeeId('All')}>
                 Back to All Employees
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={selectedEmployeeReceiptItems.length === 0}
+                onClick={() => downloadReceiptItems(selectedEmployeeReceiptItems)}
+              >
+                Download Employee Receipts ({selectedEmployeeReceiptItems.length})
               </button>
             </div>
 
