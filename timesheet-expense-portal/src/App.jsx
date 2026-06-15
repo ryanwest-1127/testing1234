@@ -511,6 +511,19 @@ export default function App() {
     [visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests]
   );
 
+  const topCardClaims = activeUser.role === 'Manager' && tab === 'dashboard'
+    ? accountClaims
+    : visibleClaims;
+
+  const topCardLeaveRequests = activeUser.role === 'Manager' && tab === 'dashboard'
+    ? accountLeaveRequests
+    : summaryLeaveRequests;
+
+  const topCardSummary = useMemo(
+    () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests),
+    [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests]
+  );
+
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
     const periodText = c.periodLabel || c.expenseMonth || c.weekLabel || c.week || '';
@@ -984,26 +997,26 @@ export default function App() {
         <div className="grid grid-4">
           <Metric
             label="Annual Leave Remaining"
-            value={`${dashboardSummary.annualLeaveRemaining} / ${dashboardSummary.annualLeaveTotal} days`}
-            sub="Quick status"
+            value={`${topCardSummary.annualLeaveRemaining} / ${topCardSummary.annualLeaveTotal} days`}
+            sub={activeUser.role === 'Manager' && tab === 'dashboard' ? 'All employees' : 'Quick status'}
             icon={<CalendarDays />}
           />
           <Metric
             label="Time in Lieu Remaining"
-            value={`${dashboardSummary.timeInLieuRemaining.toFixed(2)} hrs`}
-            sub="Quick status"
+            value={`${topCardSummary.timeInLieuRemaining.toFixed(2)} hrs`}
+            sub={activeUser.role === 'Manager' && tab === 'dashboard' ? 'All employees' : 'Quick status'}
             icon={<FileCheck2 />}
           />
           <Metric
             label="Total Expense"
-            value={money(dashboardSummary.outstandingExpenses)}
-            sub={`All claims ${money(dashboardSummary.totalExpenseClaims)} - approved/paid ${money(dashboardSummary.approvedPaidExpenses)}`}
+            value={money(topCardSummary.outstandingExpenses)}
+            sub={`All claims ${money(topCardSummary.totalExpenseClaims)} - approved/paid ${money(topCardSummary.approvedPaidExpenses)}`}
             icon={<ReceiptText />}
           />
           <Metric
             label="Pending Approval"
-            value={String(dashboardSummary.pendingApproval)}
-            sub="Submitted items"
+            value={String(topCardSummary.pendingApproval)}
+            sub={activeUser.role === 'Manager' && tab === 'dashboard' ? 'All employees' : 'Submitted items'}
             icon={<Users />}
           />
         </div>
