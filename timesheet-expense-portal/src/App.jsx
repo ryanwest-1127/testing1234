@@ -1085,6 +1085,10 @@ export default function App() {
             setWeeklyStandardHours={setWeeklyStandardHours}
             activeUser={activeUser}
             selectedWeek={selectedWeek}
+            startEditClaim={startEditClaim}
+            setTab={setTab}
+            setAlMonth={setAlMonth}
+            setHighlightedLeaveId={setHighlightedLeaveId}
           />
         )}
 
@@ -1350,7 +1354,11 @@ function Dashboard({
   weeklyStandardHours,
   setWeeklyStandardHours,
   activeUser,
-  selectedWeek
+  selectedWeek,
+  startEditClaim,
+  setTab,
+  setAlMonth,
+  setHighlightedLeaveId
 }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
   const [managerDashboardView, setManagerDashboardView] = useState('overall');
@@ -1587,7 +1595,37 @@ function Dashboard({
 
   const viewEmployeeProfile = (employeeId) => {
     setViewEmployeeId(employeeId);
+    setManagerDashboardView('overall');
     setDashboardWeek('current');
+    window.setTimeout(() => {
+      document.getElementById('manager-employee-profile')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }, 50);
+  };
+
+  const openApplication = (application) => {
+    if (application.source === 'leave') {
+      const request = (allLeaveRequests || []).find(item => item.id === application.id);
+      if (!request) return;
+
+      setViewEmployeeId(request.employeeId);
+      setAlMonth(request.startDate?.slice(0, 7) || currentMonthValue());
+      setHighlightedLeaveId(request.id);
+      setTab('annualLeave');
+
+      window.setTimeout(() => {
+        document.getElementById(`leave-row-${request.id}`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }, 100);
+      return;
+    }
+
+    const claim = (allEmployeeClaims || []).find(item => item.id === application.id);
+    if (claim) startEditClaim(claim);
   };
 
   const targetHours = Number(weeklyStandardHours || 0);
@@ -1863,7 +1901,9 @@ function Dashboard({
                           {' '}
                           <button className="btn danger" onClick={() => rejectApplication(application)}>Reject</button>
                           {' '}
-                          <button className="btn secondary" onClick={() => viewEmployeeProfile(application.employeeId)}>View Profile</button>
+                          <button className="btn secondary" onClick={() => openApplication(application)}>Open Application</button>
+                          {' '}
+                          <button className="btn ghost" onClick={() => viewEmployeeProfile(application.employeeId)}>View Profile</button>
                         </td>
                       </tr>
                     ))}
@@ -1919,7 +1959,7 @@ function Dashboard({
       )}
 
       {isManager && managerDashboardView === 'overall' && selectedBossEmployee && (
-        <div className="card">
+        <div className="card" id="manager-employee-profile">
           <div className="card-content space-y-sm">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
               <div>
