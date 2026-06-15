@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Tooltip, ResponsiveContainer, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid
+  Tooltip, ResponsiveContainer, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Legend
 } from 'recharts';
 import {
   Plus, Trash2, Upload, CheckCircle2, XCircle, Clock,
@@ -1358,6 +1358,55 @@ function Dashboard({
     }
   ];
 
+  const employeeIds = new Set(employees.filter(employee => employee.role !== 'Manager').map(employee => employee.id));
+  const managerPersonalClaims = activeUser?.role === 'Manager'
+    ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || []).filter(claim => claim.employeeId === activeUser.id)
+    : [];
+  const managerPersonalLeaveRequests = activeUser?.role === 'Manager'
+    ? (allLeaveRequests || []).filter(request => request.employeeId === activeUser.id)
+    : [];
+  const managerPersonalSummary = activeUser?.role === 'Manager'
+    ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests)
+    : null;
+  const managerPersonalChartData = managerPersonalSummary
+    ? [
+        {
+          name: 'My Time in Lieu',
+          value: Number(managerPersonalSummary.timeInLieuRemaining || 0),
+          display: `${Number(managerPersonalSummary.timeInLieuRemaining || 0).toFixed(2)} hrs`,
+          fill: '#dc2626'
+        },
+        {
+          name: 'My Total Expense',
+          value: Number(managerPersonalSummary.outstandingExpenses || 0),
+          display: money(managerPersonalSummary.outstandingExpenses),
+          fill: '#2563eb'
+        }
+      ]
+    : [];
+
+  const companyExpenseClaims = activeUser?.role === 'Manager'
+    ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || [])
+        .filter(claim => employeeIds.has(claim.employeeId) && claimTypeOf(claim) === 'expense')
+    : [];
+  const companyExpenseGross = companyExpenseClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
+  const companyExpenseApprovedPaid = companyExpenseClaims
+    .filter(claim => ['Approved', 'Paid'].includes(claim.status))
+    .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
+  const companyExpenseTotal = Math.max(0, companyExpenseGross - companyExpenseApprovedPaid);
+  const companyVATTotal = companyExpenseClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalVAT || 0), 0);
+  const companyExpenseByCategory = categories
+    .map(category => ({
+      name: category,
+      value: companyExpenseClaims.reduce((sum, claim) => {
+        return sum + (claim.expenses || [])
+          .filter(expense => (expense.category || 'Other') === category)
+          .reduce((itemSum, expense) => itemSum + Number(expense.amount || 0), 0);
+      }, 0)
+    }))
+    .filter(item => item.value > 0);
+  const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#64748b'];
+
   const bossEmployeeSummaries = activeUser?.role === 'Manager'
     ? employees
         .filter(employee => employee.role !== 'Manager')
@@ -1566,56 +1615,123 @@ function Dashboard({
         </div>
       </div>
 
+      {activeUser?.role === 'Manager' && managerPersonalSummary && (
+        <div className="card">
+          <div className="card-content space-y-sm">
+            <div>
+              <p className="small muted">My Personal Data</p>
+              <h2>Manager Personal Status</h2>
+              <p className="small muted">Your own leave, TIL and expense status is kept separate from company reporting.</p>
+            </div>
+
+            <div className="grid grid-4">
+              <Mini label="My Annual Leave" value={`${managerPersonalSummary.annualLeaveRemaining} / ${managerPersonalSummary.annualLeaveTotal} days`} />
+              <Mini label="My TIL Remaining" value={`${Number(managerPersonalSummary.timeInLieuRemaining || 0).toFixed(2)} hrs`} />
+              <Mini label="My Total Expense" value={money(managerPersonalSummary.outstandingExpenses)} />
+              <Mini label="My Pending Items" value={String(managerPersonalSummary.pendingApproval)} />
+            </div>
+
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={managerPersonalChartData} margin={{ left: 20, right: 20, top: 10, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip formatter={(_, __, item) => item?.payload?.display || ''} />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                  {managerPersonalChartData.map(item => (
+                    <Cell key={item.name} fill={item.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
       {activeUser?.role === 'Manager' && (
         <div className="card">
           <div className="card-content">
+            <div>
+              <p className="small muted">Company Overview</p>
+              <h2>All Employees Summary</h2>
+              <p className="small muted">Overall employee status, expense totals and application workload.</p>
+            </div>
+
             <div className="grid grid-4">
+              <Mini label="Company Expense Total" value={money(companyExpenseTotal)} />
+              <Mini label="All Expense Claims" value={money(companyExpenseGross)} />
+              <Mini label="Approved / Paid" value={money(companyExpenseApprovedPaid)} />
+              <Mini label="Company VAT Total" value={money(companyVATTotal)} />
+            </div>
+
+            <div className="grid grid-4" style={{ marginTop: 12 }}>
               <Mini label="Pending Timesheets" value={String(managerApprovalCounts.timesheets)} />
               <Mini label="Pending Expenses" value={String(managerApprovalCounts.expenses)} />
               <Mini label="Pending Annual Leave" value={String(managerApprovalCounts.annualLeave)} />
               <Mini label="Expenses Awaiting Payment" value={String(approvedExpensesAwaitingPayment.length)} />
             </div>
 
-            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <h2>All Employees Summary</h2>
-                <p className="small muted">Quick boss view across all employees, independent of the current employee filter.</p>
-              </div>
-            </div>
-
-            <div className="wide" style={{ marginTop: 14 }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Department</th>
-                    <th>Current Week Hours</th>
-                    <th>AL Remaining</th>
-                    <th>TIL Remaining</th>
-                    <th>Total Expense</th>
-                    <th>Pending</th>
-                    <th>Profile</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bossEmployeeSummaries.map(({ summary, ...employee }) => (
-                    <tr key={employee.id} style={viewEmployeeId === employee.id ? { background: '#dbeafe' } : undefined}>
-                      <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
-                      <td>{employee.department}</td>
-                      <td>{Number(summary.totalWorkingHours || 0).toFixed(2)} / {Number(summary.targetHours || 0).toFixed(2)} hrs</td>
-                      <td>{summary.annualLeaveRemaining} / {summary.annualLeaveTotal} days</td>
-                      <td>{Number(summary.timeInLieuRemaining || 0).toFixed(2)} hrs</td>
-                      <td>{money(summary.outstandingExpenses)}</td>
-                      <td><span className={`badge ${summary.pendingApproval ? 'Submitted' : ''}`}>{summary.pendingApproval}</span></td>
-                      <td>
-                        <button className="btn secondary" type="button" onClick={() => viewEmployeeProfile(employee.id)}>
-                          View Profile
-                        </button>
-                      </td>
+            <div className="grid grid-2-1" style={{ marginTop: 18 }}>
+              <div className="wide">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Department</th>
+                      <th>Current Week Hours</th>
+                      <th>AL Remaining</th>
+                      <th>TIL Remaining</th>
+                      <th>Total Expense</th>
+                      <th>Pending</th>
+                      <th>Profile</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {bossEmployeeSummaries.map(({ summary, ...employee }) => (
+                      <tr key={employee.id} style={viewEmployeeId === employee.id ? { background: '#dbeafe' } : undefined}>
+                        <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                        <td>{employee.department}</td>
+                        <td>{Number(summary.totalWorkingHours || 0).toFixed(2)} / {Number(summary.targetHours || 0).toFixed(2)} hrs</td>
+                        <td>{summary.annualLeaveRemaining} / {summary.annualLeaveTotal} days</td>
+                        <td>{Number(summary.timeInLieuRemaining || 0).toFixed(2)} hrs</td>
+                        <td>{money(summary.outstandingExpenses)}</td>
+                        <td><span className={`badge ${summary.pendingApproval ? 'Submitted' : ''}`}>{summary.pendingApproval}</span></td>
+                        <td>
+                          <button className="btn secondary" type="button" onClick={() => viewEmployeeProfile(employee.id)}>
+                            View Profile
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <h3 style={{ marginTop: 0 }}>Expense by Category</h3>
+                <p className="small muted">Based on all employee expense claims.</p>
+                {companyExpenseByCategory.length === 0 ? (
+                  <div className="muted" style={{ padding: 24 }}>No expense category data yet.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={companyExpenseByCategory}
+                        dataKey="value"
+                        nameKey="name"
+                        outerRadius={92}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {companyExpenseByCategory.map((item, index) => (
+                          <Cell key={item.name} fill={expensePieColors[index % expensePieColors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => money(value)} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1784,7 +1900,7 @@ function Dashboard({
         </div>
       )}
 
-      {isCurrentStatus && (
+      {isCurrentStatus && activeUser?.role !== 'Manager' && (
         <>
           <div className="grid grid-4">
             <Insight
