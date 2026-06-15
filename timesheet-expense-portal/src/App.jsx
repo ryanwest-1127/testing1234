@@ -1029,6 +1029,8 @@ export default function App() {
             employees={employees}
             viewEmployeeId={viewEmployeeId}
             setViewEmployeeId={setViewEmployeeId}
+            updateClaim={updateClaim}
+            updateLeaveRequest={updateLeaveRequest}
             weeklyStandardHours={weeklyStandardHours}
             setWeeklyStandardHours={setWeeklyStandardHours}
             activeUser={activeUser}
@@ -1293,6 +1295,8 @@ function Dashboard({
   employees,
   viewEmployeeId,
   setViewEmployeeId,
+  updateClaim,
+  updateLeaveRequest,
   weeklyStandardHours,
   setWeeklyStandardHours,
   activeUser,
@@ -1364,6 +1368,84 @@ function Dashboard({
   const selectedBossEmployee = activeUser?.role === 'Manager' && viewEmployeeId !== 'All'
     ? bossEmployeeSummaries.find(employee => employee.id === viewEmployeeId)
     : null;
+
+  const allPendingApplications = activeUser?.role === 'Manager'
+    ? [
+        ...(allEmployeeClaims || [])
+          .filter(claim => claim.status === 'Submitted')
+          .map(claim => ({
+            id: claim.id,
+            employeeId: claim.employeeId,
+            employeeName: claim.employeeName,
+            type: claimTypeOf(claim) === 'expense' ? 'Expense' : 'Timesheet',
+            period: claimTypeOf(claim) === 'expense'
+              ? (claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)))
+              : (claim.weekLabel || claim.week),
+            summary: claimTypeOf(claim) === 'expense'
+              ? money(claim.totals?.totalExpense)
+              : `${Number(claim.totals?.totalWorkingHours || 0).toFixed(2)} hrs`,
+            source: 'claim'
+          })),
+        ...(allLeaveRequests || [])
+          .filter(request => request.status === 'Submitted')
+          .map(request => ({
+            id: request.id,
+            employeeId: request.employeeId,
+            employeeName: request.employeeName,
+            type: 'Annual Leave',
+            period: `${request.startDate} -> ${request.endDate}`,
+            summary: `${calculateLeaveDays(request)} day(s)`,
+            source: 'leave'
+          }))
+      ]
+    : [];
+
+  const selectedEmployeeLeaveRequests = selectedBossEmployee
+    ? (allLeaveRequests || []).filter(request => request.employeeId === selectedBossEmployee.id)
+    : [];
+
+  const selectedEmployeeApplications = selectedBossEmployee
+    ? [
+        ...cleanVisibleClaims.map(claim => ({
+          id: claim.id,
+          type: claimTypeOf(claim) === 'expense' ? 'Expense' : 'Timesheet',
+          period: claimTypeOf(claim) === 'expense'
+            ? (claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)))
+            : (claim.weekLabel || claim.week),
+          status: claim.status,
+          summary: claimTypeOf(claim) === 'expense'
+            ? money(claim.totals?.totalExpense)
+            : `${Number(claim.totals?.totalWorkingHours || 0).toFixed(2)} hrs`,
+          source: 'claim'
+        })),
+        ...selectedEmployeeLeaveRequests.map(request => ({
+          id: request.id,
+          type: 'Annual Leave',
+          period: `${request.startDate} -> ${request.endDate}`,
+          status: request.status,
+          summary: `${calculateLeaveDays(request)} day(s)`,
+          source: 'leave'
+        }))
+      ]
+    : [];
+
+  const approveApplication = (application) => {
+    if (application.source === 'leave') {
+      updateLeaveRequest(application.id, { status: 'Approved' });
+      return;
+    }
+
+    updateClaim(application.id, { status: 'Approved' });
+  };
+
+  const rejectApplication = (application) => {
+    if (application.source === 'leave') {
+      updateLeaveRequest(application.id, { status: 'Rejected' });
+      return;
+    }
+
+    updateClaim(application.id, { status: 'Rejected' });
+  };
 
   const viewEmployeeProfile = (employeeId) => {
     setViewEmployeeId(employeeId);
@@ -1492,6 +1574,57 @@ function Dashboard({
         </div>
       )}
 
+      {activeUser?.role === 'Manager' && (
+        <div className="card">
+          <div className="card-content">
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h2>Pending Applications</h2>
+                <p className="small muted">Approve or reject all submitted AL, timesheet and expense applications from the dashboard.</p>
+              </div>
+              <span className={`badge ${allPendingApplications.length ? 'Submitted' : ''}`}>
+                {allPendingApplications.length} pending
+              </span>
+            </div>
+
+            {allPendingApplications.length === 0 ? (
+              <p className="muted" style={{ marginTop: 14 }}>No pending applications.</p>
+            ) : (
+              <div className="wide" style={{ marginTop: 14 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Application</th>
+                      <th>Period</th>
+                      <th>Summary</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allPendingApplications.map(application => (
+                      <tr key={`${application.source}-${application.id}`}>
+                        <td>{application.employeeName}</td>
+                        <td>{application.type}</td>
+                        <td>{application.period}</td>
+                        <td>{application.summary}</td>
+                        <td>
+                          <button className="btn" onClick={() => approveApplication(application)}>Approve</button>
+                          {' '}
+                          <button className="btn danger" onClick={() => rejectApplication(application)}>Reject</button>
+                          {' '}
+                          <button className="btn secondary" onClick={() => viewEmployeeProfile(application.employeeId)}>View Profile</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {selectedBossEmployee && (
         <div className="card">
           <div className="card-content space-y-sm">
@@ -1521,23 +1654,34 @@ function Dashboard({
                     <th>Period</th>
                     <th>Status</th>
                     <th>Summary</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {cleanVisibleClaims.slice(0, 6).map(claim => {
-                    const isExpense = claimTypeOf(claim) === 'expense';
+                  {selectedEmployeeApplications.map(application => {
                     return (
-                      <tr key={claim.id}>
-                        <td>{isExpense ? 'Expense' : 'Timesheet'}</td>
-                        <td>{isExpense ? (claim.periodLabel || monthLabel(getClaimExpenseMonth(claim))) : (claim.weekLabel || claim.week)}</td>
-                        <td><span className={`badge ${claim.status}`}>{claim.status}</span></td>
-                        <td>{isExpense ? money(claim.totals?.totalExpense) : `${Number(claim.totals?.totalWorkingHours || 0).toFixed(2)} hrs`}</td>
+                      <tr key={`${application.source}-${application.id}`}>
+                        <td>{application.type}</td>
+                        <td>{application.period}</td>
+                        <td><span className={`badge ${application.status}`}>{application.status}</span></td>
+                        <td>{application.summary}</td>
+                        <td>
+                          {application.status === 'Submitted' ? (
+                            <>
+                              <button className="btn" onClick={() => approveApplication(application)}>Approve</button>
+                              {' '}
+                              <button className="btn danger" onClick={() => rejectApplication(application)}>Reject</button>
+                            </>
+                          ) : (
+                            <span className="small muted">Locked</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
-                  {cleanVisibleClaims.length === 0 && (
+                  {selectedEmployeeApplications.length === 0 && (
                     <tr>
-                      <td colSpan="4" className="muted">No saved records for this employee yet.</td>
+                      <td colSpan="5" className="muted">No saved applications for this employee yet.</td>
                     </tr>
                   )}
                 </tbody>
