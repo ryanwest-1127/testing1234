@@ -813,7 +813,7 @@ export default function App() {
 
     return leaveRequests.some(existing => {
       if (existing.employeeId !== activeUser.id) return false;
-      if (existing.status === 'Rejected') return false;
+      if (['Rejected', 'Cancelled'].includes(existing.status)) return false;
       return leaveRequestDateKeys(existing).some(key => candidateKeys.has(key));
     });
   };
@@ -859,6 +859,20 @@ export default function App() {
       if (r.id !== id) return r;
       if (r.status !== 'Submitted') return r;
       return { ...r, ...patch };
+    }));
+  };
+
+  const cancelLeaveRequest = (id) => {
+    setLeaveRequests(prev => prev.map(r => {
+      if (r.id !== id) return r;
+      if (r.employeeId !== activeUser.id) return r;
+      if (r.status !== 'Submitted') return r;
+
+      return {
+        ...r,
+        status: 'Cancelled',
+        cancelledAt: new Date().toLocaleString('en-GB')
+      };
     }));
   };
 
@@ -1199,13 +1213,16 @@ export default function App() {
                           <th>Days</th>
                           <th>Status</th>
                           <th>Reason</th>
-                          {activeUser.role === 'Manager' && <th>Action</th>}
+                          <th>Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {visibleLeaveRequests.map(r => {
                           const isLocked = r.status === 'Approved';
                           const canManagerAction = activeUser.role === 'Manager' && r.status === 'Submitted';
+                          const canEmployeeCancel = activeUser.role !== 'Manager' &&
+                            r.employeeId === activeUser.id &&
+                            r.status === 'Submitted';
                           const isHighlighted = highlightedLeaveId === r.id;
 
                           return (
@@ -1222,20 +1239,21 @@ export default function App() {
                             <td>
                               {r.reason || '—'}
                               {isLocked && <div className="xsmall muted">Locked after approval</div>}
+                              {r.status === 'Cancelled' && <div className="xsmall muted">Cancelled by employee</div>}
                             </td>
-                            {activeUser.role === 'Manager' && (
-                              <td>
-                                {canManagerAction ? (
-                                  <>
-                                    <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
-                                    {' '}
-                                    <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
-                                  </>
-                                ) : (
-                                  <span className="small muted">Locked</span>
-                                )}
-                              </td>
-                            )}
+                            <td>
+                              {canManagerAction ? (
+                                <>
+                                  <button className="btn" onClick={() => updateLeaveRequest(r.id, { status: 'Approved' })}>Approve</button>
+                                  {' '}
+                                  <button className="btn danger" onClick={() => updateLeaveRequest(r.id, { status: 'Rejected' })}>Reject</button>
+                                </>
+                              ) : canEmployeeCancel ? (
+                                <button className="btn secondary" onClick={() => cancelLeaveRequest(r.id)}>Cancel Request</button>
+                              ) : (
+                                <span className="small muted">Locked</span>
+                              )}
+                            </td>
                           </tr>
                           );
                         })}
