@@ -511,13 +511,8 @@ export default function App() {
     [visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests]
   );
 
-  const topCardClaims = activeUser.role === 'Manager' && tab === 'dashboard'
-    ? accountClaims
-    : visibleClaims;
-
-  const topCardLeaveRequests = activeUser.role === 'Manager' && tab === 'dashboard'
-    ? accountLeaveRequests
-    : summaryLeaveRequests;
+  const topCardClaims = cleanClaims.filter(c => c.employeeId === activeUser.id);
+  const topCardLeaveRequests = leaveRequests.filter(r => r.employeeId === activeUser.id);
 
   const topCardSummary = useMemo(
     () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests),
@@ -998,13 +993,13 @@ export default function App() {
           <Metric
             label="Annual Leave Remaining"
             value={`${topCardSummary.annualLeaveRemaining} / ${topCardSummary.annualLeaveTotal} days`}
-            sub={activeUser.role === 'Manager' && tab === 'dashboard' ? 'All employees' : 'Quick status'}
+            sub={activeUser.role === 'Manager' ? 'Personal status' : 'Quick status'}
             icon={<CalendarDays />}
           />
           <Metric
             label="Time in Lieu Remaining"
             value={`${topCardSummary.timeInLieuRemaining.toFixed(2)} hrs`}
-            sub={activeUser.role === 'Manager' && tab === 'dashboard' ? 'All employees' : 'Quick status'}
+            sub={activeUser.role === 'Manager' ? 'Personal status' : 'Quick status'}
             icon={<FileCheck2 />}
           />
           <Metric
@@ -1016,7 +1011,7 @@ export default function App() {
           <Metric
             label="Pending Approval"
             value={String(topCardSummary.pendingApproval)}
-            sub={activeUser.role === 'Manager' && tab === 'dashboard' ? 'All employees' : 'Submitted items'}
+            sub={activeUser.role === 'Manager' ? 'Personal status' : 'Submitted items'}
             icon={<Users />}
           />
         </div>
