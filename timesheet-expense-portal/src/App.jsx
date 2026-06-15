@@ -479,6 +479,7 @@ export default function App() {
   const [receipt, setReceipt] = useState(null);
   const [editingClaimId, setEditingClaimId] = useState(null);
   const [editingOriginalClaim, setEditingOriginalClaim] = useState(null);
+  const [reviewingClaimId, setReviewingClaimId] = useState(null);
 
   useEffect(() => {
     try {
@@ -509,6 +510,7 @@ export default function App() {
       email: defaultEmployee.email,
       notes: ''
     });
+    setReviewingClaimId(null);
   }, [activeUser]);
 
   const totals = useMemo(
@@ -560,6 +562,9 @@ export default function App() {
     () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests),
     [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests]
   );
+  const reviewingClaim = reviewingClaimId
+    ? claims.find(claim => claim.id === reviewingClaimId)
+    : null;
 
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
@@ -704,6 +709,7 @@ export default function App() {
 
 
   const startEditClaim = (claim) => {
+    setReviewingClaimId(null);
     setTimesheet(claim.timesheet || defaultTimesheet());
     setExpenses(claim.expenses || [makeExpense()]);
     setTimeInLieu(claim.timeInLieu || { used: '0', earned: '0' });
@@ -721,6 +727,14 @@ export default function App() {
     setEditingClaimId(claim.id);
     setEditingOriginalClaim(claim);
     setTab(claim.type === 'expense' ? 'expense' : 'timesheet');
+  };
+
+  const openClaimForReview = (claim) => {
+    setEditingClaimId(null);
+    setEditingOriginalClaim(null);
+    setReviewingClaimId(claim.id);
+    setViewEmployeeId(claim.employeeId);
+    setTab(claimTypeOf(claim));
   };
 
   const saveEditedClaim = () => {
@@ -1063,7 +1077,10 @@ export default function App() {
           {['dashboard', 'timesheet', 'expense', 'annualLeave', 'history', 'manager'].map(t => (
             <button
               className={`tab ${tab === t ? 'active' : ''}`}
-              onClick={() => setTab(t)}
+              onClick={() => {
+                setReviewingClaimId(null);
+                setTab(t);
+              }}
               key={t}
             >
               {tabLabel(t)}
@@ -1085,7 +1102,7 @@ export default function App() {
             setWeeklyStandardHours={setWeeklyStandardHours}
             activeUser={activeUser}
             selectedWeek={selectedWeek}
-            startEditClaim={startEditClaim}
+            openClaimForReview={openClaimForReview}
             setTab={setTab}
             setAlMonth={setAlMonth}
             setHighlightedLeaveId={setHighlightedLeaveId}
@@ -1093,54 +1110,78 @@ export default function App() {
         )}
 
         {tab === 'timesheet' && (
-          <TimesheetForm
-            {...{
-              employeeInfo,
-              setEmployeeInfo,
-              setClaimEmployee,
-              employees,
-              activeUser,
-              selectedWeek,
-              setSelectedWeek,
-              timesheet,
-              updateTimesheet,
-              timeInLieu,
-              setTimeInLieu,
-              standardHours,
-              setStandardHours,
-              activeUser,
-              totals,
-              saveDraft,
-              submitTimesheet,
-              editingClaimId,
-              saveEditedClaim,
-              cancelEditClaim,
-              setTab
-            }}
-          />
+          activeUser.role === 'Manager' && reviewingClaim && claimTypeOf(reviewingClaim) === 'timesheet' ? (
+            <ManagerClaimReview
+              claim={reviewingClaim}
+              updateClaim={updateClaim}
+              setReceipt={setReceipt}
+              closeReview={() => {
+                setReviewingClaimId(null);
+                setTab('dashboard');
+              }}
+            />
+          ) : (
+            <TimesheetForm
+              {...{
+                employeeInfo,
+                setEmployeeInfo,
+                setClaimEmployee,
+                employees,
+                activeUser,
+                selectedWeek,
+                setSelectedWeek,
+                timesheet,
+                updateTimesheet,
+                timeInLieu,
+                setTimeInLieu,
+                standardHours,
+                setStandardHours,
+                activeUser,
+                totals,
+                saveDraft,
+                submitTimesheet,
+                editingClaimId,
+                saveEditedClaim,
+                cancelEditClaim,
+                setTab
+              }}
+            />
+          )
         )}
 
         {tab === 'expense' && (
-          <ExpenseForm
-            {...{
-              employeeInfo,
-              setClaimEmployee,
-              employees,
-              activeUser,
-              selectedExpenseMonth,
-              setSelectedExpenseMonth,
-              totals,
-              expenses,
-              setExpenses,
-              updateExpense,
-              uploadReceipt,
-              setReceipt,
-              submitExpense,
-              editingClaimId,
-              saveEditedClaim,
-              cancelEditClaim
-            }}
-          />
+          activeUser.role === 'Manager' && reviewingClaim && claimTypeOf(reviewingClaim) === 'expense' ? (
+            <ManagerClaimReview
+              claim={reviewingClaim}
+              updateClaim={updateClaim}
+              setReceipt={setReceipt}
+              closeReview={() => {
+                setReviewingClaimId(null);
+                setTab('dashboard');
+              }}
+            />
+          ) : (
+            <ExpenseForm
+              {...{
+                employeeInfo,
+                setClaimEmployee,
+                employees,
+                activeUser,
+                selectedExpenseMonth,
+                setSelectedExpenseMonth,
+                totals,
+                expenses,
+                setExpenses,
+                updateExpense,
+                uploadReceipt,
+                setReceipt,
+                submitExpense,
+                editingClaimId,
+                saveEditedClaim,
+                cancelEditClaim
+              }}
+            />
+          )
         )}
 
 
@@ -1355,7 +1396,7 @@ function Dashboard({
   setWeeklyStandardHours,
   activeUser,
   selectedWeek,
-  startEditClaim,
+  openClaimForReview,
   setTab,
   setAlMonth,
   setHighlightedLeaveId
@@ -1625,7 +1666,7 @@ function Dashboard({
     }
 
     const claim = (allEmployeeClaims || []).find(item => item.id === application.id);
-    if (claim) startEditClaim(claim);
+    if (claim) openClaimForReview(claim);
   };
 
   const targetHours = Number(weeklyStandardHours || 0);
@@ -2805,6 +2846,38 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
           <RefreshCw size={16} /> Clear demo data
         </button>
       </div>
+    </div>
+  );
+}
+
+function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
+  const isExpense = claimTypeOf(claim) === 'expense';
+
+  return (
+    <div className="space-y">
+      <div className="card">
+        <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <p className="small muted">Manager Review</p>
+            <h2>{isExpense ? 'Employee Expense Application' : 'Employee Timesheet Application'}</h2>
+            <p className="small muted">
+              Reviewing {claim.employeeName}'s submitted {isExpense ? 'expense claim' : 'timesheet'}.
+              This is separate from your personal application form.
+            </p>
+          </div>
+
+          <button className="btn secondary" type="button" onClick={closeReview}>
+            Back to Overall Dashboard
+          </button>
+        </div>
+      </div>
+
+      <ClaimList
+        claims={[claim]}
+        setReceipt={setReceipt}
+        manager
+        updateClaim={updateClaim}
+      />
     </div>
   );
 }
