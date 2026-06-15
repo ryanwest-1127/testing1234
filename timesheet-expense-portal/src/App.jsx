@@ -1386,6 +1386,7 @@ function Dashboard({
             employeeId: claim.employeeId,
             employeeName: claim.employeeName,
             type: claimTypeOf(claim) === 'expense' ? 'Expense' : 'Timesheet',
+            claimType: claimTypeOf(claim),
             period: claimTypeOf(claim) === 'expense'
               ? (claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)))
               : (claim.weekLabel || claim.week),
@@ -1401,11 +1402,31 @@ function Dashboard({
             employeeId: request.employeeId,
             employeeName: request.employeeName,
             type: 'Annual Leave',
+            claimType: 'annualLeave',
             period: `${request.startDate} -> ${request.endDate}`,
             summary: `${calculateLeaveDays(request)} day(s)`,
             source: 'leave'
           }))
       ]
+    : [];
+
+  const managerApprovalCounts = {
+    timesheets: allPendingApplications.filter(application => application.claimType === 'timesheet').length,
+    expenses: allPendingApplications.filter(application => application.claimType === 'expense').length,
+    annualLeave: allPendingApplications.filter(application => application.claimType === 'annualLeave').length
+  };
+
+  const approvedExpensesAwaitingPayment = activeUser?.role === 'Manager'
+    ? (allEmployeeClaims || [])
+        .filter(claim => claimTypeOf(claim) === 'expense' && claim.status === 'Approved')
+        .map(claim => ({
+          id: claim.id,
+          employeeId: claim.employeeId,
+          employeeName: claim.employeeName,
+          period: claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)),
+          summary: money(claim.totals?.totalExpense),
+          vat: money(claim.totals?.totalVAT)
+        }))
     : [];
 
   const selectedEmployeeLeaveRequests = selectedBossEmployee
@@ -1422,6 +1443,7 @@ function Dashboard({
         ...selectedEmployeeClaims.map(claim => ({
           id: claim.id,
           type: claimTypeOf(claim) === 'expense' ? 'Expense' : 'Timesheet',
+          claimType: claimTypeOf(claim),
           period: claimTypeOf(claim) === 'expense'
             ? (claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)))
             : (claim.weekLabel || claim.week),
@@ -1434,6 +1456,7 @@ function Dashboard({
         ...selectedEmployeeLeaveRequests.map(request => ({
           id: request.id,
           type: 'Annual Leave',
+          claimType: 'annualLeave',
           period: `${request.startDate} -> ${request.endDate}`,
           status: request.status,
           summary: `${calculateLeaveDays(request)} day(s)`,
@@ -1458,6 +1481,10 @@ function Dashboard({
     }
 
     updateClaim(application.id, { status: 'Rejected' });
+  };
+
+  const markApplicationPaid = (application) => {
+    updateClaim(application.id, { status: 'Paid' });
   };
 
   const viewEmployeeProfile = (employeeId) => {
@@ -1542,6 +1569,13 @@ function Dashboard({
       {activeUser?.role === 'Manager' && (
         <div className="card">
           <div className="card-content">
+            <div className="grid grid-4">
+              <Mini label="Pending Timesheets" value={String(managerApprovalCounts.timesheets)} />
+              <Mini label="Pending Expenses" value={String(managerApprovalCounts.expenses)} />
+              <Mini label="Pending Annual Leave" value={String(managerApprovalCounts.annualLeave)} />
+              <Mini label="Expenses Awaiting Payment" value={String(approvedExpensesAwaitingPayment.length)} />
+            </div>
+
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
               <div>
                 <h2>All Employees Summary</h2>
@@ -1638,6 +1672,49 @@ function Dashboard({
         </div>
       )}
 
+      {activeUser?.role === 'Manager' && approvedExpensesAwaitingPayment.length > 0 && (
+        <div className="card">
+          <div className="card-content">
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h2>Expenses Awaiting Payment</h2>
+                <p className="small muted">Approved expense claims that still need to be marked as paid.</p>
+              </div>
+              <span className="badge Approved">{approvedExpensesAwaitingPayment.length} approved</span>
+            </div>
+
+            <div className="wide" style={{ marginTop: 14 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Month</th>
+                    <th>Expense Total</th>
+                    <th>VAT</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {approvedExpensesAwaitingPayment.map(expense => (
+                    <tr key={expense.id}>
+                      <td>{expense.employeeName}</td>
+                      <td>{expense.period}</td>
+                      <td>{expense.summary}</td>
+                      <td>{expense.vat}</td>
+                      <td>
+                        <button className="btn secondary" onClick={() => markApplicationPaid(expense)}>
+                          Mark as Paid
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedBossEmployee && (
         <div className="card">
           <div className="card-content space-y-sm">
@@ -1686,6 +1763,8 @@ function Dashboard({
                               {' '}
                               <button className="btn danger" onClick={() => rejectApplication(application)}>Reject</button>
                             </>
+                          ) : application.claimType === 'expense' && application.status === 'Approved' ? (
+                            <button className="btn secondary" onClick={() => markApplicationPaid(application)}>Mark as Paid</button>
                           ) : (
                             <span className="small muted">Locked</span>
                           )}
