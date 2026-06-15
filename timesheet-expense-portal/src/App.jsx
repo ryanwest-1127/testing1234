@@ -813,7 +813,7 @@ export default function App() {
 
     return leaveRequests.some(existing => {
       if (existing.employeeId !== activeUser.id) return false;
-      if (['Rejected', 'Cancelled'].includes(existing.status)) return false;
+      if (existing.status === 'Rejected') return false;
       return leaveRequestDateKeys(existing).some(key => candidateKeys.has(key));
     });
   };
@@ -863,17 +863,9 @@ export default function App() {
   };
 
   const cancelLeaveRequest = (id) => {
-    setLeaveRequests(prev => prev.map(r => {
-      if (r.id !== id) return r;
-      if (r.employeeId !== activeUser.id) return r;
-      if (r.status !== 'Submitted') return r;
-
-      return {
-        ...r,
-        status: 'Cancelled',
-        cancelledAt: new Date().toLocaleString('en-GB')
-      };
-    }));
+    setLeaveRequests(prev =>
+      prev.filter(r => !(r.id === id && r.employeeId === activeUser.id && r.status === 'Submitted'))
+    );
   };
 
   const selectAnnualLeaveDate = (date) => {
@@ -1032,6 +1024,9 @@ export default function App() {
         {tab === 'dashboard' && (
           <Dashboard
             visibleClaims={visibleClaims}
+            allEmployeeClaims={accountClaims}
+            allLeaveRequests={accountLeaveRequests}
+            employees={employees}
             weeklyStandardHours={weeklyStandardHours}
             setWeeklyStandardHours={setWeeklyStandardHours}
             activeUser={activeUser}
@@ -1239,7 +1234,6 @@ export default function App() {
                             <td>
                               {r.reason || '—'}
                               {isLocked && <div className="xsmall muted">Locked after approval</div>}
-                              {r.status === 'Cancelled' && <div className="xsmall muted">Cancelled by employee</div>}
                             </td>
                             <td>
                               {canManagerAction ? (
@@ -1290,7 +1284,16 @@ export default function App() {
 
 
 
-function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours, activeUser, selectedWeek }) {
+function Dashboard({
+  visibleClaims,
+  allEmployeeClaims,
+  allLeaveRequests,
+  employees,
+  weeklyStandardHours,
+  setWeeklyStandardHours,
+  activeUser,
+  selectedWeek
+}) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
   const cleanVisibleClaims = uniqueClaimsByEmployeeWeekType(visibleClaims);
 
@@ -1338,6 +1341,21 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
       fill: '#2563eb'
     }
   ];
+
+  const bossEmployeeSummaries = activeUser?.role === 'Manager'
+    ? employees
+        .filter(employee => employee.role !== 'Manager')
+        .map(employee => {
+          const employeeClaims = (allEmployeeClaims || []).filter(claim => claim.employeeId === employee.id);
+          const employeeLeaveRequests = (allLeaveRequests || []).filter(request => request.employeeId === employee.id);
+          const summary = getDashboardSummary(employeeClaims, selectedWeek, weeklyStandardHours, employeeLeaveRequests);
+
+          return {
+            ...employee,
+            summary
+          };
+        })
+    : [];
 
   const targetHours = Number(weeklyStandardHours || 0);
 
@@ -1412,6 +1430,48 @@ function Dashboard({ visibleClaims, weeklyStandardHours, setWeeklyStandardHours,
           </div>
         </div>
       </div>
+
+      {activeUser?.role === 'Manager' && (
+        <div className="card">
+          <div className="card-content">
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h2>All Employees Summary</h2>
+                <p className="small muted">Quick boss view across all employees, independent of the current employee filter.</p>
+              </div>
+            </div>
+
+            <div className="wide" style={{ marginTop: 14 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th>Current Week Hours</th>
+                    <th>AL Remaining</th>
+                    <th>TIL Remaining</th>
+                    <th>Total Expense</th>
+                    <th>Pending</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bossEmployeeSummaries.map(({ summary, ...employee }) => (
+                    <tr key={employee.id}>
+                      <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                      <td>{employee.department}</td>
+                      <td>{Number(summary.totalWorkingHours || 0).toFixed(2)} / {Number(summary.targetHours || 0).toFixed(2)} hrs</td>
+                      <td>{summary.annualLeaveRemaining} / {summary.annualLeaveTotal} days</td>
+                      <td>{Number(summary.timeInLieuRemaining || 0).toFixed(2)} hrs</td>
+                      <td>{money(summary.outstandingExpenses)}</td>
+                      <td><span className={`badge ${summary.pendingApproval ? 'Submitted' : ''}`}>{summary.pendingApproval}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isCurrentStatus && (
         <>
