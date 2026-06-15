@@ -379,6 +379,10 @@ function downloadReceiptItems(items) {
   });
 }
 
+function expensesMissingReceipts(expenses) {
+  return (expenses || []).some(expense => !expense.receiptName || !expense.receiptPreview);
+}
+
 function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const timesheetClaims = cleanClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
@@ -457,6 +461,7 @@ export default function App() {
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [alForm, setAlForm] = useState({ startDate: '', endDate: '', duration: 'full', reason: '' });
   const [alError, setAlError] = useState('');
+  const [expenseError, setExpenseError] = useState('');
   const [alMonth, setAlMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [highlightedLeaveId, setHighlightedLeaveId] = useState('');
   const [selectedWeek, setSelectedWeek] = useState('2026-W21');
@@ -597,6 +602,7 @@ export default function App() {
   };
 
   const updateExpense = (i, field, value) => {
+    setExpenseError('');
     setExpenses(prev =>
       prev.map((e, idx) => {
         if (idx !== i) return e;
@@ -623,6 +629,7 @@ export default function App() {
   const uploadReceipt = (i, file) => {
     if (!file) return;
 
+    setExpenseError('');
     updateExpense(i, 'receiptName', file.name);
 
     const reader = new FileReader();
@@ -691,6 +698,13 @@ export default function App() {
   };
 
   const submitExpense = () => {
+    setExpenseError('');
+
+    if (expensesMissingReceipts(expenses)) {
+      setExpenseError('Every expense item needs a receipt proof before it can be submitted.');
+      return;
+    }
+
     upsertClaim(buildExpenseClaim('Submitted'));
     setExpenses([makeExpense()]);
     setTab('dashboard');
@@ -745,6 +759,14 @@ export default function App() {
     let updatedClaim;
 
     if (originalType === 'expense') {
+      setExpenseError('');
+
+      if (expensesMissingReceipts(expenses)) {
+        setExpenseError('Every expense item needs a receipt proof before expense changes can be saved.');
+        setTab('expense');
+        return;
+      }
+
       const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
       const vatTotal = expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
       const selectedEmployee = employees.find(e => e.id === employeeInfo.employeeId);
@@ -1045,29 +1067,44 @@ export default function App() {
           </div>
         </motion.header>
 
+        {activeUser.role === 'Manager' && (
+          <div className="card">
+            <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Personal Snapshot</p>
+                <h2>My Manager Account Data</h2>
+                <p className="small muted">These cards show Boss personal AL, TIL, expense and pending items only. Company totals are in Overall Dashboard.</p>
+              </div>
+              <span className="badge Approved">Personal</span>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-4">
           <Metric
-            label="Annual Leave Remaining"
+            label={activeUser.role === 'Manager' ? 'Personal Annual Leave' : 'Annual Leave Remaining'}
             value={`${topCardSummary.annualLeaveRemaining} / ${topCardSummary.annualLeaveTotal} days`}
-            sub={activeUser.role === 'Manager' ? 'Personal status' : 'Quick status'}
+            sub={activeUser.role === 'Manager' ? 'Boss personal status only' : 'Quick status'}
             icon={<CalendarDays />}
           />
           <Metric
-            label="Time in Lieu Remaining"
+            label={activeUser.role === 'Manager' ? 'Personal Time in Lieu' : 'Time in Lieu Remaining'}
             value={`${topCardSummary.timeInLieuRemaining.toFixed(2)} hrs`}
-            sub={activeUser.role === 'Manager' ? 'Personal status' : 'Quick status'}
+            sub={activeUser.role === 'Manager' ? 'Boss personal status only' : 'Quick status'}
             icon={<FileCheck2 />}
           />
           <Metric
-            label="Total Expense"
+            label={activeUser.role === 'Manager' ? 'Personal Total Expense' : 'Total Expense'}
             value={money(topCardSummary.outstandingExpenses)}
-            sub={`All claims ${money(topCardSummary.totalExpenseClaims)} - approved/paid ${money(topCardSummary.approvedPaidExpenses)}`}
+            sub={activeUser.role === 'Manager'
+              ? `Personal claims ${money(topCardSummary.totalExpenseClaims)} - approved/paid ${money(topCardSummary.approvedPaidExpenses)}`
+              : `All claims ${money(topCardSummary.totalExpenseClaims)} - approved/paid ${money(topCardSummary.approvedPaidExpenses)}`}
             icon={<ReceiptText />}
           />
           <Metric
-            label="Pending Approval"
+            label={activeUser.role === 'Manager' ? 'Personal Pending Items' : 'Pending Approval'}
             value={String(topCardSummary.pendingApproval)}
-            sub={activeUser.role === 'Manager' ? 'Personal status' : 'Submitted items'}
+            sub={activeUser.role === 'Manager' ? 'Boss personal submissions only' : 'Submitted items'}
             icon={<Users />}
           />
         </div>
@@ -1176,6 +1213,7 @@ export default function App() {
                 uploadReceipt,
                 setReceipt,
                 submitExpense,
+                expenseError,
                 editingClaimId,
                 saveEditedClaim,
                 cancelEditClaim
@@ -2688,9 +2726,10 @@ function ExpenseForm(p) {
           {p.expenses.map((e, i) => {
             const selectedVatRate = e.vatRate || 'custom';
             const vatIsCustom = selectedVatRate === 'custom';
+            const hasReceiptProof = Boolean(e.receiptName && e.receiptPreview);
 
             return (
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 2fr 1.5fr auto' }} key={e.id}>
+            <div className="grid expense-row" key={e.id}>
               <input className="input" type="date" value={e.date} onChange={ev => p.updateExpense(i, 'date', ev.target.value)} />
 
               <select className="select" value={e.category} onChange={ev => p.updateExpense(i, 'category', ev.target.value)}>
@@ -2713,20 +2752,41 @@ function ExpenseForm(p) {
               />
               <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
 
-              <label className="btn secondary">
-                <Upload size={16} /> Upload
-                <input hidden type="file" accept="image/*,.pdf" onChange={ev => p.uploadReceipt(i, ev.target.files?.[0])} />
-              </label>
+              <div className="receipt-proof-cell">
+                {hasReceiptProof ? (
+                  <div className="receipt-proof">
+                    <button
+                      className="btn secondary receipt-proof-trigger"
+                      type="button"
+                      aria-label={`Receipt uploaded: ${e.receiptName}`}
+                    >
+                      <CheckCircle2 size={18} />
+                    </button>
+                    <div className="receipt-proof-popover">
+                      <p className="xsmall muted">Uploaded proof</p>
+                      <b>{e.receiptName}</b>
+                      <div className="flex gap" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+                        <button className="btn ghost" type="button" onClick={() => p.setReceipt(e)}>
+                          <Eye size={16} /> View
+                        </button>
+                        <label className="btn ghost">
+                          Replace
+                          <input hidden type="file" accept="image/*,.pdf" onChange={ev => p.uploadReceipt(i, ev.target.files?.[0])} />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="btn secondary">
+                    <Upload size={16} /> Upload
+                    <input hidden type="file" accept="image/*,.pdf" onChange={ev => p.uploadReceipt(i, ev.target.files?.[0])} />
+                  </label>
+                )}
+              </div>
 
               <button className="btn ghost" onClick={() => p.setExpenses(prev => prev.filter((_, idx) => idx !== i))}>
                 <Trash2 size={16} />
               </button>
-
-              {e.receiptName && (
-                <button className="btn ghost" onClick={() => p.setReceipt(e)}>
-                  View {e.receiptName}
-                </button>
-              )}
             </div>
             );
           })}
@@ -2741,6 +2801,11 @@ function ExpenseForm(p) {
               ? 'This updates the existing expense record for the selected employee, month and claim type.'
               : 'This will submit expense only. It is no longer linked to the weekly timesheet.'}
           </p>
+          {p.expenseError && (
+            <div style={{ background: '#fee2e2', color: '#991b1b', padding: 12, borderRadius: 12 }}>
+              {p.expenseError}
+            </div>
+          )}
 
           {p.editingClaimId ? (
             <div className="flex gap" style={{ flexWrap: 'wrap' }}>
