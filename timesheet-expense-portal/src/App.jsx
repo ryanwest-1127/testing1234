@@ -1311,7 +1311,18 @@ function Dashboard({
   selectedWeek
 }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
-  const cleanVisibleClaims = uniqueClaimsByEmployeeWeekType(visibleClaims);
+  const [managerDashboardView, setManagerDashboardView] = useState('overall');
+  const isManager = activeUser?.role === 'Manager';
+  const isManagerPersonalDashboard = isManager && managerDashboardView === 'personal';
+  const managerPersonalClaims = isManager
+    ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || []).filter(claim => claim.employeeId === activeUser.id)
+    : [];
+  const managerPersonalLeaveRequests = isManager
+    ? (allLeaveRequests || []).filter(request => request.employeeId === activeUser.id)
+    : [];
+  const cleanVisibleClaims = uniqueClaimsByEmployeeWeekType(
+    isManagerPersonalDashboard ? managerPersonalClaims : visibleClaims
+  );
 
   const timesheetClaims = cleanVisibleClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
   const expenseClaims = cleanVisibleClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
@@ -1359,13 +1370,7 @@ function Dashboard({
   ];
 
   const employeeIds = new Set(employees.filter(employee => employee.role !== 'Manager').map(employee => employee.id));
-  const managerPersonalClaims = activeUser?.role === 'Manager'
-    ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || []).filter(claim => claim.employeeId === activeUser.id)
-    : [];
-  const managerPersonalLeaveRequests = activeUser?.role === 'Manager'
-    ? (allLeaveRequests || []).filter(request => request.employeeId === activeUser.id)
-    : [];
-  const managerPersonalSummary = activeUser?.role === 'Manager'
+  const managerPersonalSummary = isManager
     ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests)
     : null;
   const managerPersonalChartData = managerPersonalSummary
@@ -1385,7 +1390,7 @@ function Dashboard({
       ]
     : [];
 
-  const companyExpenseClaims = activeUser?.role === 'Manager'
+  const companyExpenseClaims = isManager
     ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || [])
         .filter(claim => employeeIds.has(claim.employeeId) && claimTypeOf(claim) === 'expense')
     : [];
@@ -1407,7 +1412,7 @@ function Dashboard({
     .filter(item => item.value > 0);
   const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#64748b'];
 
-  const bossEmployeeSummaries = activeUser?.role === 'Manager'
+  const bossEmployeeSummaries = isManager
     ? employees
         .filter(employee => employee.role !== 'Manager')
         .map(employee => {
@@ -1422,11 +1427,11 @@ function Dashboard({
         })
     : [];
 
-  const selectedBossEmployee = activeUser?.role === 'Manager' && viewEmployeeId !== 'All'
+  const selectedBossEmployee = isManager && viewEmployeeId !== 'All'
     ? bossEmployeeSummaries.find(employee => employee.id === viewEmployeeId)
     : null;
 
-  const allPendingApplications = activeUser?.role === 'Manager'
+  const allPendingApplications = isManager
     ? [
         ...(allEmployeeClaims || [])
           .filter(claim => claim.status === 'Submitted')
@@ -1465,7 +1470,7 @@ function Dashboard({
     annualLeave: allPendingApplications.filter(application => application.claimType === 'annualLeave').length
   };
 
-  const approvedExpensesAwaitingPayment = activeUser?.role === 'Manager'
+  const approvedExpensesAwaitingPayment = isManager
     ? (allEmployeeClaims || [])
         .filter(claim => claimTypeOf(claim) === 'expense' && claim.status === 'Approved')
         .map(claim => ({
@@ -1599,28 +1604,56 @@ function Dashboard({
           <div>
             <h2>Dashboard</h2>
             <p className="small muted">
-              Select Current for status, or choose a week for detailed breakdown.
+              {isManager
+                ? 'Switch between company reporting and your own personal status.'
+                : 'Select Current for status, or choose a week for detailed breakdown.'}
             </p>
           </div>
 
           <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-            <label className="label">View week</label>
-            <select className="select" value={dashboardWeek} onChange={e => setDashboardWeek(e.target.value)} style={{ width: 260 }}>
-              <option value="current">Current status</option>
-              {weekOptions.map(week => (
-                <option key={week} value={week}>{weekLabel(week)}</option>
-              ))}
-            </select>
+            {isManager && (
+              <div className="tabs" style={{ margin: 0, gridTemplateColumns: '1fr 1fr', minWidth: 340 }}>
+                <button
+                  className={`tab ${managerDashboardView === 'overall' ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => {
+                    setManagerDashboardView('overall');
+                    setDashboardWeek('current');
+                  }}
+                >
+                  Overall Dashboard
+                </button>
+                <button
+                  className={`tab ${managerDashboardView === 'personal' ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setManagerDashboardView('personal')}
+                >
+                  Personal Dashboard
+                </button>
+              </div>
+            )}
+
+            {(!isManager || isManagerPersonalDashboard) && (
+              <>
+                <label className="label">View week</label>
+                <select className="select" value={dashboardWeek} onChange={e => setDashboardWeek(e.target.value)} style={{ width: 260 }}>
+                  <option value="current">Current status</option>
+                  {weekOptions.map(week => (
+                    <option key={week} value={week}>{weekLabel(week)}</option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {activeUser?.role === 'Manager' && managerPersonalSummary && (
+      {isManagerPersonalDashboard && managerPersonalSummary && isCurrentStatus && (
         <div className="card">
           <div className="card-content space-y-sm">
             <div>
-              <p className="small muted">My Personal Data</p>
-              <h2>Manager Personal Status</h2>
+              <p className="small muted">Personal Dashboard</p>
+              <h2>My Personal Status</h2>
               <p className="small muted">Your own leave, TIL and expense status is kept separate from company reporting.</p>
             </div>
 
@@ -1648,11 +1681,11 @@ function Dashboard({
         </div>
       )}
 
-      {activeUser?.role === 'Manager' && (
+      {isManager && managerDashboardView === 'overall' && (
         <div className="card">
           <div className="card-content">
             <div>
-              <p className="small muted">Company Overview</p>
+              <p className="small muted">Overall Dashboard</p>
               <h2>All Employees Summary</h2>
               <p className="small muted">Overall employee status, expense totals and application workload.</p>
             </div>
@@ -1737,7 +1770,7 @@ function Dashboard({
         </div>
       )}
 
-      {activeUser?.role === 'Manager' && (
+      {isManager && managerDashboardView === 'overall' && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -1788,7 +1821,7 @@ function Dashboard({
         </div>
       )}
 
-      {activeUser?.role === 'Manager' && approvedExpensesAwaitingPayment.length > 0 && (
+      {isManager && managerDashboardView === 'overall' && approvedExpensesAwaitingPayment.length > 0 && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -1831,7 +1864,7 @@ function Dashboard({
         </div>
       )}
 
-      {selectedBossEmployee && (
+      {isManager && managerDashboardView === 'overall' && selectedBossEmployee && (
         <div className="card">
           <div className="card-content space-y-sm">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -1900,7 +1933,7 @@ function Dashboard({
         </div>
       )}
 
-      {isCurrentStatus && activeUser?.role !== 'Manager' && (
+      {isCurrentStatus && !isManager && (
         <>
           <div className="grid grid-4">
             <Insight
