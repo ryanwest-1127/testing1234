@@ -1960,6 +1960,47 @@ function Dashboard({
         </div>
       )}
 
+      {isManagerOverallDashboard && (
+        <div className="card">
+          <div className="card-content">
+            <div>
+              <p className="small muted">Company Overview</p>
+              <h2>Employee Overall Summary</h2>
+              <p className="small muted">Quick status across all employees for manager review.</p>
+            </div>
+
+            <div className="wide" style={{ marginTop: 14 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th>Current Week Hours</th>
+                    <th>AL Remaining</th>
+                    <th>TIL Remaining</th>
+                    <th>Expense Total</th>
+                    <th>Pending Items</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bossEmployeeSummaries.map(({ summary, ...employee }) => (
+                    <tr key={employee.id}>
+                      <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                      <td>{employee.department}</td>
+                      <td>{Number(summary.totalWorkingHours || 0).toFixed(2)} / {Number(summary.targetHours || 0).toFixed(2)} hrs</td>
+                      <td>{summary.annualLeaveRemaining} / {summary.annualLeaveTotal} days</td>
+                      <td>{Number(summary.timeInLieuRemaining || 0).toFixed(2)} hrs</td>
+                      <td>{money(summary.outstandingExpenses)}</td>
+                      <td><span className={`badge ${summary.pendingApproval ? 'Submitted' : ''}`}>{summary.pendingApproval}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isManagerPersonalDashboard && managerPersonalSummary && isCurrentStatus && (
         <div className="card">
           <div className="card-content space-y-sm">
