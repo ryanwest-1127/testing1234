@@ -63,6 +63,12 @@ th { color: #64748b; font-weight: 700; }
 .badge.Approved { background: #d1fae5; color: #047857; }
 .badge.Rejected { background: #ffe4e6; color: #be123c; }
 .badge.Paid { background: #ede9fe; color: #6d28d9; }
+.badge.al-status.Submitted { background: #fef3c7; color: #92400e; }
+.badge.al-status.Approved { background: #d1fae5; color: #047857; }
+.badge.al-status.Rejected { background: #ffe4e6; color: #be123c; }
+.request-stepper { display: grid; grid-template-columns: 42px minmax(64px, auto) 42px; align-items: center; gap: 8px; }
+.request-stepper .btn { min-width: 42px; padding: 8px 0; }
+.request-stepper-count { min-width: 64px; text-align: center; font-weight: 800; color: #475569; }
 .receipt-thumb { max-height: 380px; width: 100%; object-fit: contain; border-radius: 18px; }
 .expense-row { grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1.2fr 1.6fr 120px auto; align-items: center; }
 .receipt-proof-cell { min-height: 42px; display: flex; align-items: center; }

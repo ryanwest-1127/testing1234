@@ -3319,12 +3319,13 @@ function ManagerAnnualLeaveAdmin({
   const selectedEmployeeAllRequests = selectedEmployeeId
     ? leaveRequests.filter(request => request.employeeId === selectedEmployeeId)
     : [];
-  const selectedEmployeePendingRequests = selectedEmployeeAllRequests
-    .filter(request => request.status === 'Submitted')
-    .filter(matchesSearch);
-  const selectedEmployeeDisplayRequests = mode === 'approval'
-    ? selectedEmployeePendingRequests
-    : selectedEmployeeRequests;
+  const selectedEmployeeDisplayRequests = selectedEmployeeAllRequests
+    .filter(matchesSearch)
+    .sort((a, b) => {
+      const statusRank = { Submitted: 0, Approved: 1, Rejected: 2 };
+      return (statusRank[a.status] ?? 3) - (statusRank[b.status] ?? 3) ||
+        String(b.submittedAt || '').localeCompare(String(a.submittedAt || ''));
+    });
   const selectedEmployeeSelectedRequest = selectedEmployeeDisplayRequests.find(request => request.id === selectedRequestId) ||
     selectedEmployeeDisplayRequests[0] ||
     null;
@@ -3415,14 +3416,12 @@ function ManagerAnnualLeaveAdmin({
         </div>
       ) : (
         <>
-          <div className="card">
-            <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <p className="small muted">Employee Full Data</p>
-                <h2>{selectedEmployee?.name || 'Employee'} Annual Leave</h2>
-                <p className="small muted">Review this employee's AL balance, readonly application detail and approval history.</p>
-              </div>
-              <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <p className="small muted">Annual Leave Requests</p>
+              <h2>{selectedEmployee?.name || 'Employee'} Annual Leave</h2>
+            </div>
+            <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
                 <select
                   className="select"
                   value={selectedEmployeeId}
@@ -3436,7 +3435,6 @@ function ManagerAnnualLeaveAdmin({
                 <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
                 <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
                 <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
-              </div>
             </div>
           </div>
 
@@ -3461,6 +3459,44 @@ function ManagerAnnualLeaveAdmin({
               setSelectedRequestId={setSelectedRequestId}
               updateLeaveRequest={updateLeaveRequest}
             />
+          </div>
+
+          <div className="card">
+            <div className="card-content">
+              <h2>AL Employee Summary</h2>
+              <p className="small muted">Pending staff stay at the top with a green light.</p>
+              <div className="wide" style={{ marginTop: 14 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Department</th>
+                      <th>Pending</th>
+                      <th>Approved</th>
+                      <th>Rejected</th>
+                      <th>Total</th>
+                      <th>Full Data</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employeeRows.map(employee => (
+                      <tr key={employee.id} className={employee.pending ? 'employee-row-pending' : ''}>
+                        <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                        <td>{employee.department}</td>
+                        <td>
+                          {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
+                          {employee.pending}
+                        </td>
+                        <td>{employee.approved}</td>
+                        <td>{employee.rejected}</td>
+                        <td>{employee.total}</td>
+                        <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -3505,7 +3541,7 @@ function AnnualLeaveCalendar({ alBlanks, alDays, leaveRequestsForDate, readOnly 
                 {isWeekend && <div className="xsmall muted">Weekend</div>}
                 <div className="space-y-sm" style={{ marginTop: 6 }}>
                   {items.slice(0, 2).map(item => (
-                    <div key={item.id} className={`badge ${item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
+                    <div key={item.id} className={`badge al-status ${item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
                       {item.employeeName} · {item.duration === 'half' ? 'Half day' : 'AL'} · {item.status}
                     </div>
                   ))}
@@ -3542,11 +3578,11 @@ function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSel
         <div className="flex justify-between items-center" style={{ gap: 12 }}>
           <div>
             <h2>Annual Leave Requests</h2>
-            <p className="small muted">Use the arrows to move through this employee's pending AL requests only.</p>
+            <p className="small muted">Use the arrows to move through this employee's AL request records.</p>
           </div>
-          <div className="flex gap items-center">
+          <div className="request-stepper">
             <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveRequest(-1)}>{'<'}</button>
-            <span className="small muted">{requests.length ? `${selectedIndex + 1} / ${requests.length}` : '0 / 0'}</span>
+            <span className="request-stepper-count">{requests.length ? `${selectedIndex + 1} / ${requests.length}` : '0 / 0'}</span>
             <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveRequest(1)}>{'>'}</button>
           </div>
         </div>
@@ -3565,7 +3601,10 @@ function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSel
             <ReadOnlyField label="Start Date" value={request.startDate || ''} />
             <ReadOnlyField label="End Date" value={request.endDate || ''} />
             <ReadOnlyField label="Duration" value={request.duration === 'half' ? 'Half day' : 'Full day'} />
-            <ReadOnlyField label="Status" value={request.status || ''} />
+            <div>
+              <label className="label">Status</label>
+              <span className={`badge al-status ${request.status}`}>{request.status || ''}</span>
+            </div>
 
             <div>
               <label className="label">Reason / Notes</label>
@@ -3643,7 +3682,7 @@ function AnnualLeaveRequestTable({ requests, updateLeaveRequest, highlightedLeav
                     <td>{request.startDate} {'->'} {request.endDate}</td>
                     <td>{request.duration === 'half' ? 'Half day' : 'Full day'}</td>
                     <td>{calculateLeaveDays(request)}</td>
-                    <td><span className={`badge ${request.status}`}>{request.status}</span></td>
+                    <td><span className={`badge al-status ${request.status}`}>{request.status}</span></td>
                     <td>
                       {request.reason || '—'}
                       {isLocked && <div className="xsmall muted">Locked after approval</div>}
