@@ -456,6 +456,7 @@ function tabLabel(tab) {
 export default function App() {
   const [tab, setTab] = useState('dashboard');
   const [activeUser, setActiveUser] = useState(employees[0]);
+  const [managerDataMode, setManagerDataMode] = useState('overall');
   const [viewEmployeeId, setViewEmployeeId] = useState('All');
   const [claims, setClaims] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
@@ -499,7 +500,7 @@ export default function App() {
   }, [claims, leaveRequests]);
 
   useEffect(() => {
-    const defaultEmployee = activeUser.role === 'Manager'
+    const defaultEmployee = activeUser.role === 'Manager' && managerDataMode === 'overall'
       ? employees.find(e => e.role !== 'Manager') || activeUser
       : activeUser;
 
@@ -516,7 +517,7 @@ export default function App() {
       notes: ''
     });
     setReviewingClaimId(null);
-  }, [activeUser]);
+  }, [activeUser, managerDataMode]);
 
   const totals = useMemo(
   () => calculateTotals(timesheet, expenses, timeInLieu, standardHours),
@@ -536,22 +537,22 @@ export default function App() {
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
 
   const accountClaims =
-    activeUser.role === 'Manager'
+    activeUser.role === 'Manager' && managerDataMode === 'overall'
       ? cleanClaims
       : cleanClaims.filter(c => c.employeeId === activeUser.id);
 
   const visibleClaims =
-    activeUser.role === 'Manager' && viewEmployeeId !== 'All'
+    activeUser.role === 'Manager' && managerDataMode === 'overall' && viewEmployeeId !== 'All'
       ? accountClaims.filter(c => c.employeeId === viewEmployeeId)
       : accountClaims;
 
   const accountLeaveRequests =
-    activeUser.role === 'Manager'
+    activeUser.role === 'Manager' && managerDataMode === 'overall'
       ? leaveRequests
       : leaveRequests.filter(r => r.employeeId === activeUser.id);
 
   const summaryLeaveRequests =
-    activeUser.role === 'Manager' && viewEmployeeId !== 'All'
+    activeUser.role === 'Manager' && managerDataMode === 'overall' && viewEmployeeId !== 'All'
       ? accountLeaveRequests.filter(r => r.employeeId === viewEmployeeId)
       : accountLeaveRequests;
 
@@ -567,9 +568,33 @@ export default function App() {
     () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests),
     [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests]
   );
+  const companyTopCardClaims = cleanClaims.filter(c => employees.some(employee => employee.role !== 'Manager' && employee.id === c.employeeId));
+  const companyTopCardLeaveRequests = leaveRequests.filter(r => employees.some(employee => employee.role !== 'Manager' && employee.id === r.employeeId));
+  const companyTopCardSummary = useMemo(
+    () => getDashboardSummary(companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests),
+    [companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests]
+  );
+  const summaryCardsMode = activeUser.role === 'Manager' ? managerDataMode : 'personal';
+  const summaryCardsData = summaryCardsMode === 'overall' ? companyTopCardSummary : topCardSummary;
   const reviewingClaim = reviewingClaimId
     ? claims.find(claim => claim.id === reviewingClaimId)
     : null;
+  const managerPersonalMode = activeUser.role === 'Manager' && managerDataMode === 'personal';
+  const visibleTabs = activeUser.role === 'Manager'
+    ? managerDataMode === 'overall'
+      ? ['dashboard', 'history']
+      : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history']
+    : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history'];
+
+  const switchManagerDataMode = (mode) => {
+    setManagerDataMode(mode);
+    setReviewingClaimId(null);
+    setEditingClaimId(null);
+    setEditingOriginalClaim(null);
+    setExpenseError('');
+    setTab('dashboard');
+    setViewEmployeeId(mode === 'overall' ? 'All' : activeUser.id);
+  };
 
   const filteredClaims = visibleClaims.filter(c => {
     const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
@@ -875,9 +900,9 @@ export default function App() {
   };
 
   const visibleLeaveRequests =
-    activeUser.role === 'Manager' && viewEmployeeId !== 'All'
+    activeUser.role === 'Manager' && managerDataMode === 'overall' && viewEmployeeId !== 'All'
       ? leaveRequests.filter(r => r.employeeId === viewEmployeeId)
-      : activeUser.role === 'Manager'
+      : activeUser.role === 'Manager' && managerDataMode === 'overall'
         ? leaveRequests
         : leaveRequests.filter(r => r.employeeId === activeUser.id);
 
@@ -1048,7 +1073,7 @@ export default function App() {
                 </select>
               </div>
 
-              {activeUser.role === 'Manager' && (
+              {activeUser.role === 'Manager' && managerDataMode === 'overall' && (
                 <div>
                   <label className="label" style={{ color: '#cbd5e1' }}>View data</label>
                   <select
@@ -1068,12 +1093,42 @@ export default function App() {
         </motion.header>
 
         {activeUser.role === 'Manager' && (
+          <div className="grid grid-2">
+            <button
+              className={`mode-card ${managerDataMode === 'overall' ? 'active' : ''}`}
+              type="button"
+              onClick={() => switchManagerDataMode('overall')}
+            >
+              <div>
+                <p className="small muted">Overall Company Data</p>
+                <h2>Approval Dashboard</h2>
+                <p className="small muted">Review all employees, approve applications, manage receipts and company expense totals.</p>
+              </div>
+              <span className={`badge ${managerDataMode === 'overall' ? 'Submitted' : ''}`}>Company</span>
+            </button>
+
+            <button
+              className={`mode-card ${managerDataMode === 'personal' ? 'active' : ''}`}
+              type="button"
+              onClick={() => switchManagerDataMode('personal')}
+            >
+              <div>
+                <p className="small muted">Personal Data</p>
+                <h2>My Input Forms</h2>
+                <p className="small muted">Enter Boss personal timesheet, expense and annual leave data only.</p>
+              </div>
+              <span className={`badge ${managerDataMode === 'personal' ? 'Approved' : ''}`}>Personal</span>
+            </button>
+          </div>
+        )}
+
+        {activeUser.role === 'Manager' && managerDataMode === 'personal' && (
           <div className="card">
             <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
               <div>
                 <p className="small muted">Personal Snapshot</p>
                 <h2>My Manager Account Data</h2>
-                <p className="small muted">These cards show Boss personal AL, TIL, expense and pending items only. Company totals are in Overall Dashboard.</p>
+                <p className="small muted">These cards show Boss personal AL, TIL, expense and pending items only.</p>
               </div>
               <span className="badge Approved">Personal</span>
             </div>
@@ -1082,36 +1137,52 @@ export default function App() {
 
         <div className="grid grid-4">
           <Metric
-            label={activeUser.role === 'Manager' ? 'Personal Annual Leave' : 'Annual Leave Remaining'}
-            value={`${topCardSummary.annualLeaveRemaining} / ${topCardSummary.annualLeaveTotal} days`}
-            sub={activeUser.role === 'Manager' ? 'Boss personal status only' : 'Quick status'}
+            label={activeUser.role === 'Manager'
+              ? summaryCardsMode === 'overall' ? 'Company AL Remaining' : 'Personal Annual Leave'
+              : 'Annual Leave Remaining'}
+            value={`${summaryCardsData.annualLeaveRemaining} / ${summaryCardsData.annualLeaveTotal} days`}
+            sub={activeUser.role === 'Manager'
+              ? summaryCardsMode === 'overall' ? 'All employees approved AL' : 'Boss personal status only'
+              : 'Quick status'}
             icon={<CalendarDays />}
           />
           <Metric
-            label={activeUser.role === 'Manager' ? 'Personal Time in Lieu' : 'Time in Lieu Remaining'}
-            value={`${topCardSummary.timeInLieuRemaining.toFixed(2)} hrs`}
-            sub={activeUser.role === 'Manager' ? 'Boss personal status only' : 'Quick status'}
+            label={activeUser.role === 'Manager'
+              ? summaryCardsMode === 'overall' ? 'Company Time in Lieu' : 'Personal Time in Lieu'
+              : 'Time in Lieu Remaining'}
+            value={`${summaryCardsData.timeInLieuRemaining.toFixed(2)} hrs`}
+            sub={activeUser.role === 'Manager'
+              ? summaryCardsMode === 'overall' ? 'All employees cumulative TIL' : 'Boss personal status only'
+              : 'Quick status'}
             icon={<FileCheck2 />}
           />
           <Metric
-            label={activeUser.role === 'Manager' ? 'Personal Total Expense' : 'Total Expense'}
-            value={money(topCardSummary.outstandingExpenses)}
+            label={activeUser.role === 'Manager'
+              ? summaryCardsMode === 'overall' ? 'Company Total Expense' : 'Personal Total Expense'
+              : 'Total Expense'}
+            value={money(summaryCardsData.outstandingExpenses)}
             sub={activeUser.role === 'Manager'
-              ? `Personal claims ${money(topCardSummary.totalExpenseClaims)} - approved/paid ${money(topCardSummary.approvedPaidExpenses)}`
-              : `All claims ${money(topCardSummary.totalExpenseClaims)} - approved/paid ${money(topCardSummary.approvedPaidExpenses)}`}
+              ? summaryCardsMode === 'overall'
+                ? `Company claims ${money(summaryCardsData.totalExpenseClaims)} - approved/paid ${money(summaryCardsData.approvedPaidExpenses)}`
+                : `Personal claims ${money(summaryCardsData.totalExpenseClaims)} - approved/paid ${money(summaryCardsData.approvedPaidExpenses)}`
+              : `All claims ${money(summaryCardsData.totalExpenseClaims)} - approved/paid ${money(summaryCardsData.approvedPaidExpenses)}`}
             icon={<ReceiptText />}
           />
           <Metric
-            label={activeUser.role === 'Manager' ? 'Personal Pending Items' : 'Pending Approval'}
-            value={String(topCardSummary.pendingApproval)}
-            sub={activeUser.role === 'Manager' ? 'Boss personal submissions only' : 'Submitted items'}
+            label={activeUser.role === 'Manager'
+              ? summaryCardsMode === 'overall' ? 'Company Pending Items' : 'Personal Pending Items'
+              : 'Pending Approval'}
+            value={String(summaryCardsData.pendingApproval)}
+            sub={activeUser.role === 'Manager'
+              ? summaryCardsMode === 'overall' ? 'Submitted employee applications' : 'Boss personal submissions only'
+              : 'Submitted items'}
             icon={<Users />}
           />
         </div>
 
         <div className="tabs">
           <button className="btn danger" onClick={resetDemoData}>Reset Demo Data</button>
-          {['dashboard', 'timesheet', 'expense', 'annualLeave', 'history', 'manager'].map(t => (
+          {visibleTabs.map(t => (
             <button
               className={`tab ${tab === t ? 'active' : ''}`}
               onClick={() => {
@@ -1139,6 +1210,7 @@ export default function App() {
             setWeeklyStandardHours={setWeeklyStandardHours}
             activeUser={activeUser}
             selectedWeek={selectedWeek}
+            managerDataMode={managerDataMode}
             openClaimForReview={openClaimForReview}
             setTab={setTab}
             setAlMonth={setAlMonth}
@@ -1165,6 +1237,7 @@ export default function App() {
                 setClaimEmployee,
                 employees,
                 activeUser,
+                personalMode: managerPersonalMode,
                 selectedWeek,
                 setSelectedWeek,
                 timesheet,
@@ -1204,6 +1277,7 @@ export default function App() {
                 setClaimEmployee,
                 employees,
                 activeUser,
+                personalMode: managerPersonalMode,
                 selectedExpenseMonth,
                 setSelectedExpenseMonth,
                 totals,
@@ -1434,15 +1508,16 @@ function Dashboard({
   setWeeklyStandardHours,
   activeUser,
   selectedWeek,
+  managerDataMode,
   openClaimForReview,
   setTab,
   setAlMonth,
   setHighlightedLeaveId
 }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
-  const [managerDashboardView, setManagerDashboardView] = useState('overall');
   const isManager = activeUser?.role === 'Manager';
-  const isManagerPersonalDashboard = isManager && managerDashboardView === 'personal';
+  const isManagerPersonalDashboard = isManager && managerDataMode === 'personal';
+  const isManagerOverallDashboard = isManager && managerDataMode === 'overall';
   const managerPersonalClaims = isManager
     ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || []).filter(claim => claim.employeeId === activeUser.id)
     : [];
@@ -1674,7 +1749,6 @@ function Dashboard({
 
   const viewEmployeeProfile = (employeeId) => {
     setViewEmployeeId(employeeId);
-    setManagerDashboardView('overall');
     setDashboardWeek('current');
     window.setTimeout(() => {
       document.getElementById('manager-employee-profile')?.scrollIntoView({
@@ -1766,34 +1840,14 @@ function Dashboard({
             <h2>Dashboard</h2>
             <p className="small muted">
               {isManager
-                ? 'Switch between company reporting and your own personal status.'
+                ? isManagerOverallDashboard
+                  ? 'Overall company approval dashboard.'
+                  : 'Personal dashboard for your own manager account data.'
                 : 'Select Current for status, or choose a week for detailed breakdown.'}
             </p>
           </div>
 
           <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-            {isManager && (
-              <div className="tabs" style={{ margin: 0, gridTemplateColumns: '1fr 1fr', minWidth: 340 }}>
-                <button
-                  className={`tab ${managerDashboardView === 'overall' ? 'active' : ''}`}
-                  type="button"
-                  onClick={() => {
-                    setManagerDashboardView('overall');
-                    setDashboardWeek('current');
-                  }}
-                >
-                  Overall Dashboard
-                </button>
-                <button
-                  className={`tab ${managerDashboardView === 'personal' ? 'active' : ''}`}
-                  type="button"
-                  onClick={() => setManagerDashboardView('personal')}
-                >
-                  Personal Dashboard
-                </button>
-              </div>
-            )}
-
             {(!isManager || isManagerPersonalDashboard) && (
               <>
                 <label className="label">View week</label>
@@ -1842,7 +1896,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManager && managerDashboardView === 'overall' && (
+      {isManagerOverallDashboard && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -1941,7 +1995,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManager && managerDashboardView === 'overall' && (
+      {isManagerOverallDashboard && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -1994,7 +2048,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManager && managerDashboardView === 'overall' && approvedExpensesAwaitingPayment.length > 0 && (
+      {isManagerOverallDashboard && approvedExpensesAwaitingPayment.length > 0 && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -2037,7 +2091,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManager && managerDashboardView === 'overall' && selectedBossEmployee && (
+      {isManagerOverallDashboard && selectedBossEmployee && (
         <div className="card" id="manager-employee-profile">
           <div className="card-content space-y-sm">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -2462,7 +2516,7 @@ function TimesheetForm(p) {
         <div className="card-content grid grid-4">
           <div>
             <label className="label">Employee</label>
-            {p.activeUser?.role === 'Manager' ? (
+            {p.activeUser?.role === 'Manager' && !p.personalMode ? (
               <select className="select" value={p.employeeInfo.employeeId} onChange={e => p.setClaimEmployee(e.target.value)}>
                 {p.employees.filter(u => u.role !== 'Manager').map(u => (
                   <option key={u.id} value={u.id}>{u.name}</option>
@@ -2687,7 +2741,7 @@ function ExpenseForm(p) {
         <div className="card-content grid grid-4">
           <div>
             <label className="label">Employee</label>
-            {p.activeUser?.role === 'Manager' ? (
+            {p.activeUser?.role === 'Manager' && !p.personalMode ? (
               <select className="select" value={p.employeeInfo.employeeId} onChange={e => p.setClaimEmployee(e.target.value)}>
                 {p.employees.filter(u => u.role !== 'Manager').map(u => (
                   <option key={u.id} value={u.id}>{u.name}</option>
