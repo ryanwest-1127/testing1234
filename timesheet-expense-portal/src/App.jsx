@@ -1648,17 +1648,22 @@ function Dashboard({
     .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
   const companyExpenseTotal = Math.max(0, companyExpenseGross - companyExpenseApprovedPaid);
   const companyVATTotal = companyExpenseClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalVAT || 0), 0);
-  const companyExpenseByCategory = categories
-    .map(category => ({
-      name: category,
-      value: companyExpenseClaims.reduce((sum, claim) => {
-        return sum + (claim.expenses || [])
-          .filter(expense => (expense.category || 'Other') === category)
-          .reduce((itemSum, expense) => itemSum + Number(expense.amount || 0), 0);
-      }, 0)
-    }))
-    .filter(item => item.value > 0);
-  const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#64748b'];
+  const companyExpenseByCategory = Object.values(
+    companyExpenseClaims.reduce((groups, claim) => {
+      (claim.expenses || []).forEach(expense => {
+        const category = expense.category || 'Other';
+        const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
+        groups[category] = {
+          ...existing,
+          value: existing.value + Number(expense.amount || 0),
+          vat: existing.vat + Number(expense.vat || 0),
+          count: existing.count + 1
+        };
+      });
+      return groups;
+    }, {})
+  ).sort((a, b) => b.value - a.value);
+  const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#0891b2', '#f97316', '#64748b'];
   const companyReceiptItems = receiptDownloadItemsFromClaims(companyExpenseClaims);
 
   const bossEmployeeSummaries = isManager
@@ -1996,6 +2001,101 @@ function Dashboard({
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isManagerOverallDashboard && (
+        <div className="card">
+          <div className="card-content">
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Company Expense Overview</p>
+                <h2>Expense Overall Summary</h2>
+                <p className="small muted">Company expense by category, built from all employee expense items.</p>
+              </div>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={companyReceiptItems.length === 0}
+                onClick={() => downloadReceiptItems(companyReceiptItems)}
+              >
+                Download All Receipts ({companyReceiptItems.length})
+              </button>
+            </div>
+
+            <div className="grid grid-4" style={{ marginTop: 14 }}>
+              <Mini label="Company Expense Total" value={money(companyExpenseTotal)} />
+              <Mini label="All Expense Claims" value={money(companyExpenseGross)} />
+              <Mini label="Approved / Paid" value={money(companyExpenseApprovedPaid)} />
+              <Mini label="Company VAT Total" value={money(companyVATTotal)} />
+            </div>
+
+            <div className="grid grid-2-1" style={{ marginTop: 18 }}>
+              <div>
+                {companyExpenseByCategory.length === 0 ? (
+                  <div className="muted" style={{ padding: 24 }}>No expense category data yet.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={companyExpenseByCategory}
+                        dataKey="value"
+                        nameKey="name"
+                        outerRadius={100}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {companyExpenseByCategory.map((item, index) => (
+                          <Cell key={item.name} fill={expensePieColors[index % expensePieColors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => money(value)} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className="wide">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th>Items</th>
+                      <th>Total</th>
+                      <th>VAT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {companyExpenseByCategory.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="muted">No expense category data yet.</td>
+                      </tr>
+                    ) : companyExpenseByCategory.map((category, index) => (
+                      <tr key={category.name}>
+                        <td>
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              display: 'inline-block',
+                              width: 10,
+                              height: 10,
+                              borderRadius: 999,
+                              background: expensePieColors[index % expensePieColors.length],
+                              marginRight: 8
+                            }}
+                          />
+                          <b>{category.name}</b>
+                        </td>
+                        <td>{category.count}</td>
+                        <td>{money(category.value)}</td>
+                        <td>{money(category.vat)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
