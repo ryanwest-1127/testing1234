@@ -3354,27 +3354,14 @@ function ManagerAnnualLeaveAdmin({
     <div className="space-y">
       <ApprovalDashboardNav setTab={setTab} currentTab="annualLeave" counts={approvalCounts} />
 
-      <div className="card">
-        <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <p className="small muted">Approval Dashboard</p>
-            <h2>Annual Leave Requests</h2>
-            <p className="small muted">Review AL requests first. Open an employee to see the calendar and full AL history.</p>
-          </div>
-
-          <button className="btn secondary" type="button" onClick={closeAdmin}>
-            Back to Approval Dashboard
-          </button>
-        </div>
-      </div>
-
-      {!selectedEmployeeId && (
-        <div className={`card ${pendingRequests.length ? '' : ''}`}>
+      {!selectedEmployeeId ? (
+        <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
               <div>
-                <p className="small muted">Pending Card</p>
-                <h2>{pendingRequests.length} AL request(s) waiting</h2>
+                <p className="small muted">Annual Leave Requests</p>
+                <h2>Employee Summary</h2>
+                <p className="small muted">{pendingRequests.length} AL request(s) waiting. Open an employee to view their calendar and full annual leave data.</p>
               </div>
               <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
                 <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
@@ -3392,15 +3379,7 @@ function ManagerAnnualLeaveAdmin({
                 onChange={event => setSearchText(event.target.value)}
               />
             </div>
-          </div>
-        </div>
-      )}
 
-      {!selectedEmployeeId ? (
-        <div className="card">
-          <div className="card-content">
-            <h2>Employee Summary</h2>
-            <p className="small muted">Open an employee to view their calendar and full annual leave data.</p>
             <div className="wide" style={{ marginTop: 14 }}>
               <table>
                 <thead>
@@ -3797,70 +3776,50 @@ function ManagerAdminCategory({
         totalAmount,
         totalHours
       };
-    });
+    })
+    .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
 
   return (
     <div className="space-y">
       <ApprovalDashboardNav setTab={setTab} currentTab={currentTab} counts={approvalCounts} />
 
-      <div className="card">
-        <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <p className="small muted">Approval Dashboard</p>
-            <h2>{title}</h2>
-            <p className="small muted">{note}</p>
-          </div>
-
-          <div className="flex gap" style={{ flexWrap: 'wrap' }}>
-            <button className="btn secondary" type="button" onClick={closeAdmin}>
-              Back to Approval Dashboard
-            </button>
-            {showReceiptDownload && (
-              <button
-                className="btn secondary"
-                type="button"
-                disabled={receiptItems.length === 0}
-                onClick={() => downloadReceiptItems(receiptItems)}
-              >
-                Download All Receipt Proofs ({receiptItems.length})
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-content">
-          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <p className="small muted">Pending Card</p>
-              <h2>{pendingClaims.length} {isExpenseAdmin ? 'expense' : 'timesheet'} application(s) waiting</h2>
-              <p className="small muted">{note}</p>
-            </div>
-            <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
-              <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
-              <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
-            </div>
-          </div>
-
-          <div className="flex gap items-center" style={{ marginTop: 14, flexWrap: 'wrap' }}>
-            <Search size={16} />
-            <input
-              className="input"
-              style={{ maxWidth: 440 }}
-              placeholder="Search employee, period, project, category or note..."
-              value={searchText}
-              onChange={event => setSearchText(event.target.value)}
-            />
-          </div>
-        </div>
-      </div>
-
       {!selectedEmployeeId ? (
         <div className="card">
           <div className="card-content">
-            <h2>Employee Summary</h2>
-            <p className="small muted">Open an employee to view full {isExpenseAdmin ? 'expense' : 'timesheet'} data and approval detail.</p>
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">{title}</p>
+                <h2>Employee Summary</h2>
+                <p className="small muted">{pendingClaims.length} {isExpenseAdmin ? 'expense' : 'timesheet'} application(s) waiting. {note}</p>
+              </div>
+              <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+                <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
+                  <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
+                  <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
+                </div>
+                {showReceiptDownload && (
+                  <button
+                    className="btn secondary"
+                    type="button"
+                    disabled={receiptItems.length === 0}
+                    onClick={() => downloadReceiptItems(receiptItems)}
+                  >
+                    Download All Receipt Proofs ({receiptItems.length})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap items-center" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+              <Search size={16} />
+              <input
+                className="input"
+                style={{ maxWidth: 440 }}
+                placeholder="Search employee, period, project, category or note..."
+                value={searchText}
+                onChange={event => setSearchText(event.target.value)}
+              />
+            </div>
 
             <div className="wide" style={{ marginTop: 14 }}>
               <table>
@@ -3878,10 +3837,13 @@ function ManagerAdminCategory({
                 </thead>
                 <tbody>
                   {employeeRows.map(employee => (
-                    <tr key={employee.id}>
+                    <tr key={employee.id} className={employee.pending ? 'employee-row-pending' : ''}>
                       <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
                       <td>{employee.department}</td>
-                      <td>{employee.pending}</td>
+                      <td>
+                        {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
+                        {employee.pending}
+                      </td>
                       <td>{employee.approved}</td>
                       <td>{employee.rejected}</td>
                       <td>{isExpenseAdmin ? money(employee.totalAmount) : `${employee.totalHours.toFixed(2)} hrs`}</td>
