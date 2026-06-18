@@ -43,6 +43,8 @@ button, input, textarea, select { font: inherit; }
 .manager-mode-switch button.active { background: white; color: #020617; }
 .approval-tile { position: relative; text-align: left; width: 100%; min-height: 150px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px 18px 18px 48px; cursor: pointer; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
 .approval-tile.pending { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe, 0 18px 30px rgba(37,99,235,.16); }
+.approval-tile-title { margin: 0 0 10px; font-size: 22px; line-height: 1.15; color: #0f172a; }
+.approval-tile-count { margin: 0 0 8px; font-size: 15px; font-weight: 800; color: #2563eb; }
 .status-light { position: absolute; left: 18px; top: 22px; width: 14px; height: 14px; border-radius: 999px; background: #cbd5e1; }
 .approval-tile.pending .status-light { background: #22c55e; box-shadow: 0 0 0 6px #dcfce7; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }

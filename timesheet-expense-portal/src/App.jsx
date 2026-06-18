@@ -1946,8 +1946,8 @@ function Dashboard({
               >
                 <span className="status-light" />
                 <div>
-                  <p className="small muted">Company AL Applications</p>
-                  <h2>{managerApprovalCounts.annualLeave} pending</h2>
+                  <h2 className="approval-tile-title">Company AL Applications</h2>
+                  <p className="approval-tile-count">{managerApprovalCounts.annualLeave} pending</p>
                   <p className="small muted">{(allLeaveRequests || []).length} total annual leave application(s)</p>
                 </div>
               </button>
@@ -1959,8 +1959,8 @@ function Dashboard({
               >
                 <span className="status-light" />
                 <div>
-                  <p className="small muted">Timesheet Applications</p>
-                  <h2>{managerApprovalCounts.timesheets} pending</h2>
+                  <h2 className="approval-tile-title">Timesheet Applications</h2>
+                  <p className="approval-tile-count">{managerApprovalCounts.timesheets} pending</p>
                   <p className="small muted">{(allEmployeeClaims || []).filter(claim => claimTypeOf(claim) === 'timesheet').length} total timesheet application(s)</p>
                 </div>
               </button>
@@ -1972,8 +1972,8 @@ function Dashboard({
               >
                 <span className="status-light" />
                 <div>
-                  <p className="small muted">Company Expense Applications</p>
-                  <h2>{managerApprovalCounts.expenses} pending</h2>
+                  <h2 className="approval-tile-title">Company Expense Applications</h2>
+                  <p className="approval-tile-count">{managerApprovalCounts.expenses} pending</p>
                   <p className="small muted">{approvedExpensesAwaitingPayment.length} approved awaiting payment</p>
                 </div>
               </button>
@@ -3262,6 +3262,13 @@ function ManagerAnnualLeaveAdmin({
   const selectedEmployeeRequests = selectedEmployeeId
     ? visibleRequests.filter(request => request.employeeId === selectedEmployeeId)
     : [];
+  const selectedEmployeeAllRequests = selectedEmployeeId
+    ? leaveRequests.filter(request => request.employeeId === selectedEmployeeId)
+    : [];
+  const selectedEmployeeApprovedUsed = calculateApprovedLeaveDays(selectedEmployeeAllRequests);
+  const selectedEmployeePending = selectedEmployeeAllRequests.filter(request => request.status === 'Submitted').length;
+  const selectedEmployeeRemaining = Math.max(0, 28 - selectedEmployeeApprovedUsed);
+  const selectedEmployeeLatestRequest = selectedEmployeeRequests[0] || selectedEmployeeAllRequests[0] || null;
 
   const employeeRows = employees
     .filter(employee => employee.role !== 'Manager')
@@ -3292,31 +3299,33 @@ function ManagerAnnualLeaveAdmin({
         </div>
       </div>
 
-      <div className={`card ${pendingRequests.length ? '' : ''}`}>
-        <div className="card-content">
-          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <p className="small muted">Pending Card</p>
-              <h2>{pendingRequests.length} AL request(s) waiting</h2>
+      {!selectedEmployeeId && (
+        <div className={`card ${pendingRequests.length ? '' : ''}`}>
+          <div className="card-content">
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Pending Card</p>
+                <h2>{pendingRequests.length} AL request(s) waiting</h2>
+              </div>
+              <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
+                <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
+                <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
+              </div>
             </div>
-            <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
-              <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
-              <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
-            </div>
-          </div>
 
-          <div className="flex gap items-center" style={{ marginTop: 14, flexWrap: 'wrap' }}>
-            <Search size={16} />
-            <input
-              className="input"
-              style={{ maxWidth: 420 }}
-              placeholder="Search employee, date, status or note..."
-              value={searchText}
-              onChange={event => setSearchText(event.target.value)}
-            />
+            <div className="flex gap items-center" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+              <Search size={16} />
+              <input
+                className="input"
+                style={{ maxWidth: 420 }}
+                placeholder="Search employee, date, status or note..."
+                value={searchText}
+                onChange={event => setSearchText(event.target.value)}
+              />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {!selectedEmployeeId ? (
         <div className="card">
@@ -3360,20 +3369,32 @@ function ManagerAnnualLeaveAdmin({
               <div>
                 <p className="small muted">Employee Full Data</p>
                 <h2>{selectedEmployee?.name || 'Employee'} Annual Leave</h2>
+                <p className="small muted">Review this employee's AL balance, readonly application detail and approval history.</p>
               </div>
               <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
                 <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
+                <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
                 <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
               </div>
             </div>
           </div>
 
-          <AnnualLeaveCalendar
-            alBlanks={alBlanks}
-            alDays={alDays}
-            leaveRequestsForDate={(day) => leaveRequestsForDate(day).filter(request => request.employeeId === selectedEmployeeId)}
-            readOnly
-          />
+          <div className="grid grid-3">
+            <Insight title="Annual Leave Remaining" value={`${selectedEmployeeRemaining} / 28 days`} note="Approved AL deducted" icon={<CalendarDays />} />
+            <Insight title="Pending AL" value={String(selectedEmployeePending)} note="Waiting for approval" icon={<Clock />} />
+            <Insight title="Approved AL Used" value={`${selectedEmployeeApprovedUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
+          </div>
+
+          <div className="grid grid-2-1">
+            <AnnualLeaveCalendar
+              alBlanks={alBlanks}
+              alDays={alDays}
+              leaveRequestsForDate={(day) => leaveRequestsForDate(day).filter(request => request.employeeId === selectedEmployeeId)}
+              readOnly
+            />
+
+            <AnnualLeaveReadonlyApplication request={selectedEmployeeLatestRequest} />
+          </div>
 
           <AnnualLeaveRequestTable
             requests={selectedEmployeeRequests}
@@ -3433,6 +3454,40 @@ function AnnualLeaveCalendar({ alBlanks, alDays, leaveRequestsForDate, readOnly 
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AnnualLeaveReadonlyApplication({ request }) {
+  return (
+    <div className="card">
+      <div className="card-content space-y-sm">
+        <h2>Annual Leave Application</h2>
+        <p className="small muted">Readonly manager view. Changes are made through approve or reject at the bottom.</p>
+
+        {!request ? (
+          <p className="muted">No AL application selected for this employee.</p>
+        ) : (
+          <>
+            <ReadOnlyField label="Employee" value={request.employeeName || ''} />
+            <ReadOnlyField label="Start Date" value={request.startDate || ''} />
+            <ReadOnlyField label="End Date" value={request.endDate || ''} />
+            <ReadOnlyField label="Duration" value={request.duration === 'half' ? 'Half day' : 'Full day'} />
+            <ReadOnlyField label="Status" value={request.status || ''} />
+
+            <div>
+              <label className="label">Reason / Notes</label>
+              <textarea className="textarea" value={request.reason || ''} disabled readOnly />
+            </div>
+
+            <div className="card-dark" style={{ padding: 16 }}>
+              <p className="small">Selected AL Days</p>
+              <h2>{calculateLeaveDays(request)} day(s)</h2>
+              <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Submitted AL is deducted only after approval.</p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -3708,7 +3763,10 @@ function ManagerAdminCategory({ title, note, claims, employees, setReceipt, upda
                 <h2>{selectedEmployee?.name || 'Employee'} {isExpenseAdmin ? 'Expense' : 'Timesheet'} Applications</h2>
                 <p className="small muted">Showing {mode === 'approval' ? 'pending approval' : 'history'} records that match the current search.</p>
               </div>
-              <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
+              <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+                <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
+                <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
+              </div>
             </div>
           </div>
 
