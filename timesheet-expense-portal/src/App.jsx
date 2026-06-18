@@ -1011,7 +1011,7 @@ export default function App() {
     setAlError('');
     setAlForm(prev => {
       if (!prev.startDate || (prev.startDate && prev.endDate)) {
-        return { ...prev, startDate: key, endDate: key };
+        return { ...prev, startDate: key, endDate: '' };
       }
 
       if (new Date(key) < new Date(prev.startDate)) {
@@ -3290,7 +3290,6 @@ function ManagerAnnualLeaveAdmin({
   leaveRequestsForDate,
   highlightedLeaveId
 }) {
-  const [mode, setMode] = useState('approval');
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [selectedRequestId, setSelectedRequestId] = useState('');
@@ -3309,13 +3308,7 @@ function ManagerAnnualLeaveAdmin({
   };
 
   const pendingRequests = leaveRequests.filter(request => request.status === 'Submitted');
-  const visibleRequests = leaveRequests
-    .filter(request => mode === 'approval' ? request.status === 'Submitted' : request.status !== 'Submitted')
-    .filter(matchesSearch);
   const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
-  const selectedEmployeeRequests = selectedEmployeeId
-    ? visibleRequests.filter(request => request.employeeId === selectedEmployeeId)
-    : [];
   const selectedEmployeeAllRequests = selectedEmployeeId
     ? leaveRequests.filter(request => request.employeeId === selectedEmployeeId)
     : [];
@@ -3349,7 +3342,13 @@ function ManagerAnnualLeaveAdmin({
 
   useEffect(() => {
     setSelectedRequestId(selectedEmployeeDisplayRequests[0]?.id || '');
-  }, [selectedEmployeeId, mode, searchText, leaveRequests.length]);
+  }, [selectedEmployeeId, searchText, leaveRequests.length]);
+
+  useEffect(() => {
+    if (selectedEmployeeSelectedRequest?.startDate) {
+      setAlMonth(selectedEmployeeSelectedRequest.startDate.slice(0, 7));
+    }
+  }, [selectedEmployeeSelectedRequest?.id]);
 
   return (
     <div className="space-y">
@@ -3363,10 +3362,6 @@ function ManagerAnnualLeaveAdmin({
                 <p className="small muted">Annual Leave Requests</p>
                 <h2>Employee Summary</h2>
                 <p className="small muted">{pendingRequests.length} AL request(s) waiting. Open an employee to view their calendar and full annual leave data.</p>
-              </div>
-              <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
-                <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
-                <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
               </div>
             </div>
 
@@ -3518,7 +3513,11 @@ function AnnualLeaveCalendar({ alBlanks, alDays, leaveRequestsForDate, readOnly 
             const key = formatISODateLocal(day);
             const items = leaveRequestsForDate(day);
             const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-            const isSelected = alForm.startDate && alForm.endDate && key >= alForm.startDate && key <= alForm.endDate;
+            const isSelected = alForm.startDate && (
+              alForm.endDate
+                ? key >= alForm.startDate && key <= alForm.endDate
+                : key === alForm.startDate
+            );
 
             return (
               <button
