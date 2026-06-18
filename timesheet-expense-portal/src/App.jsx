@@ -1248,6 +1248,13 @@ export default function App() {
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => setTab('dashboard')}
+              setTab={setTab}
+              currentTab="timesheet"
+              approvalCounts={{
+                annualLeave: companyAlSubmitted,
+                timesheets: accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet' && claim.status === 'Submitted').length,
+                expenses: accountClaims.filter(claim => claimTypeOf(claim) === 'expense' && claim.status === 'Submitted').length
+              }}
             />
           ) : (
             <TimesheetForm
@@ -1299,6 +1306,13 @@ export default function App() {
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => setTab('dashboard')}
+              setTab={setTab}
+              currentTab="expense"
+              approvalCounts={{
+                annualLeave: companyAlSubmitted,
+                timesheets: accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet' && claim.status === 'Submitted').length,
+                expenses: accountClaims.filter(claim => claimTypeOf(claim) === 'expense' && claim.status === 'Submitted').length
+              }}
               showReceiptDownload
             />
           ) : (
@@ -1335,6 +1349,12 @@ export default function App() {
               employees={employees}
               updateLeaveRequest={updateLeaveRequest}
               closeAdmin={() => setTab('dashboard')}
+              setTab={setTab}
+              approvalCounts={{
+                annualLeave: companyAlSubmitted,
+                timesheets: accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet' && claim.status === 'Submitted').length,
+                expenses: accountClaims.filter(claim => claimTypeOf(claim) === 'expense' && claim.status === 'Submitted').length
+              }}
               alMonth={alMonth}
               setAlMonth={setAlMonth}
               alBlanks={alBlanks}
@@ -3225,11 +3245,44 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
   );
 }
 
+function ApprovalDashboardNav({ setTab, currentTab, counts = {} }) {
+  const items = [
+    { key: 'dashboard', title: 'Dashboard', count: null, note: 'Approval overview' },
+    { key: 'annualLeave', title: 'AL Applications', count: counts.annualLeave || 0, note: 'Annual leave requests' },
+    { key: 'timesheet', title: 'Timesheet Applications', count: counts.timesheets || 0, note: 'Timesheet submissions' },
+    { key: 'expense', title: 'Expense Applications', count: counts.expenses || 0, note: 'Expense claims' }
+  ];
+
+  return (
+    <div className="card">
+      <div className="card-content">
+        <p className="small muted">Approval Dashboard</p>
+        <div className="grid grid-4" style={{ marginTop: 12 }}>
+          {items.map(item => (
+            <button
+              key={item.key}
+              type="button"
+              className={`approval-nav-tile ${currentTab === item.key ? 'active' : ''} ${item.count ? 'pending' : ''}`}
+              onClick={() => setTab(item.key)}
+            >
+              <span className="approval-nav-title">{item.title}</span>
+              {item.count !== null && <span className="approval-nav-count">{item.count} pending</span>}
+              <span className="xsmall muted">{item.note}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ManagerAnnualLeaveAdmin({
   leaveRequests,
   employees,
   updateLeaveRequest,
   closeAdmin,
+  setTab,
+  approvalCounts,
   alMonth,
   setAlMonth,
   alBlanks,
@@ -3240,6 +3293,7 @@ function ManagerAnnualLeaveAdmin({
   const [mode, setMode] = useState('approval');
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [selectedRequestId, setSelectedRequestId] = useState('');
 
   const matchesSearch = (request) => {
     const haystack = [
@@ -3265,10 +3319,18 @@ function ManagerAnnualLeaveAdmin({
   const selectedEmployeeAllRequests = selectedEmployeeId
     ? leaveRequests.filter(request => request.employeeId === selectedEmployeeId)
     : [];
+  const selectedEmployeePendingRequests = selectedEmployeeAllRequests
+    .filter(request => request.status === 'Submitted')
+    .filter(matchesSearch);
+  const selectedEmployeeDisplayRequests = mode === 'approval'
+    ? selectedEmployeePendingRequests
+    : selectedEmployeeRequests;
+  const selectedEmployeeSelectedRequest = selectedEmployeeDisplayRequests.find(request => request.id === selectedRequestId) ||
+    selectedEmployeeDisplayRequests[0] ||
+    null;
   const selectedEmployeeApprovedUsed = calculateApprovedLeaveDays(selectedEmployeeAllRequests);
   const selectedEmployeePending = selectedEmployeeAllRequests.filter(request => request.status === 'Submitted').length;
   const selectedEmployeeRemaining = Math.max(0, 28 - selectedEmployeeApprovedUsed);
-  const selectedEmployeeLatestRequest = selectedEmployeeRequests[0] || selectedEmployeeAllRequests[0] || null;
 
   const employeeRows = employees
     .filter(employee => employee.role !== 'Manager')
@@ -3281,10 +3343,17 @@ function ManagerAnnualLeaveAdmin({
         approved: employeeRequests.filter(request => request.status === 'Approved').length,
         rejected: employeeRequests.filter(request => request.status === 'Rejected').length
       };
-    });
+    })
+    .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
+
+  useEffect(() => {
+    setSelectedRequestId(selectedEmployeeDisplayRequests[0]?.id || '');
+  }, [selectedEmployeeId, mode, searchText, leaveRequests.length]);
 
   return (
     <div className="space-y">
+      <ApprovalDashboardNav setTab={setTab} currentTab="annualLeave" counts={approvalCounts} />
+
       <div className="card">
         <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div>
@@ -3347,10 +3416,13 @@ function ManagerAnnualLeaveAdmin({
                 </thead>
                 <tbody>
                   {employeeRows.map(employee => (
-                    <tr key={employee.id}>
+                    <tr key={employee.id} className={employee.pending ? 'employee-row-pending' : ''}>
                       <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
                       <td>{employee.department}</td>
-                      <td>{employee.pending}</td>
+                      <td>
+                        {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
+                        {employee.pending}
+                      </td>
                       <td>{employee.approved}</td>
                       <td>{employee.rejected}</td>
                       <td>{employee.total}</td>
@@ -3372,6 +3444,16 @@ function ManagerAnnualLeaveAdmin({
                 <p className="small muted">Review this employee's AL balance, readonly application detail and approval history.</p>
               </div>
               <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+                <select
+                  className="select"
+                  value={selectedEmployeeId}
+                  onChange={event => setSelectedEmployeeId(event.target.value)}
+                  style={{ maxWidth: 220 }}
+                >
+                  {employeeRows.map(employee => (
+                    <option key={employee.id} value={employee.id}>{employee.name}</option>
+                  ))}
+                </select>
                 <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
                 <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
                 <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
@@ -3393,15 +3475,14 @@ function ManagerAnnualLeaveAdmin({
               readOnly
             />
 
-            <AnnualLeaveReadonlyApplication request={selectedEmployeeLatestRequest} />
+            <AnnualLeaveRequestsPanel
+              requests={selectedEmployeeDisplayRequests}
+              request={selectedEmployeeSelectedRequest}
+              selectedRequestId={selectedRequestId}
+              setSelectedRequestId={setSelectedRequestId}
+              updateLeaveRequest={updateLeaveRequest}
+            />
           </div>
-
-          <AnnualLeaveRequestTable
-            requests={selectedEmployeeRequests}
-            updateLeaveRequest={updateLeaveRequest}
-            highlightedLeaveId={highlightedLeaveId}
-            manager
-          />
         </>
       )}
     </div>
@@ -3459,17 +3540,48 @@ function AnnualLeaveCalendar({ alBlanks, alDays, leaveRequestsForDate, readOnly 
   );
 }
 
-function AnnualLeaveReadonlyApplication({ request }) {
+function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSelectedRequestId, updateLeaveRequest }) {
+  const [note, setNote] = useState('');
+  const selectedIndex = Math.max(0, requests.findIndex(item => item.id === selectedRequestId));
+  const canMovePrevious = requests.length > 1 && selectedIndex > 0;
+  const canMoveNext = requests.length > 1 && selectedIndex < requests.length - 1;
+  const canManagerAction = request?.status === 'Submitted';
+
+  useEffect(() => {
+    setNote(request?.managerNote || '');
+  }, [request?.id]);
+
+  const moveRequest = (direction) => {
+    if (!requests.length) return;
+    const nextIndex = Math.min(Math.max(selectedIndex + direction, 0), requests.length - 1);
+    setSelectedRequestId(requests[nextIndex]?.id || '');
+  };
+
   return (
     <div className="card">
       <div className="card-content space-y-sm">
-        <h2>Annual Leave Application</h2>
-        <p className="small muted">Readonly manager view. Changes are made through approve or reject at the bottom.</p>
+        <div className="flex justify-between items-center" style={{ gap: 12 }}>
+          <div>
+            <h2>Annual Leave Requests</h2>
+            <p className="small muted">Use the arrows to move through this employee's pending AL requests only.</p>
+          </div>
+          <div className="flex gap items-center">
+            <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveRequest(-1)}>{'<'}</button>
+            <span className="small muted">{requests.length ? `${selectedIndex + 1} / ${requests.length}` : '0 / 0'}</span>
+            <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveRequest(1)}>{'>'}</button>
+          </div>
+        </div>
 
         {!request ? (
-          <p className="muted">No AL application selected for this employee.</p>
+          <p className="muted">No AL requests in this view for this employee.</p>
         ) : (
           <>
+            <div className="card-dark" style={{ padding: 16 }}>
+              <p className="small">Selected AL Days</p>
+              <h2>{calculateLeaveDays(request)} day(s)</h2>
+              <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Submitted AL is deducted only after approval.</p>
+            </div>
+
             <ReadOnlyField label="Employee" value={request.employeeName || ''} />
             <ReadOnlyField label="Start Date" value={request.startDate || ''} />
             <ReadOnlyField label="End Date" value={request.endDate || ''} />
@@ -3481,11 +3593,25 @@ function AnnualLeaveReadonlyApplication({ request }) {
               <textarea className="textarea" value={request.reason || ''} disabled readOnly />
             </div>
 
-            <div className="card-dark" style={{ padding: 16 }}>
-              <p className="small">Selected AL Days</p>
-              <h2>{calculateLeaveDays(request)} day(s)</h2>
-              <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Submitted AL is deducted only after approval.</p>
+            <div>
+              <label className="label">Manager Note / Reject Reason</label>
+              <textarea
+                className="textarea"
+                placeholder="Add approval note or reject reason..."
+                value={note}
+                disabled={!canManagerAction}
+                onChange={event => setNote(event.target.value)}
+              />
             </div>
+
+            {canManagerAction ? (
+              <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+                <button className="btn" type="button" onClick={() => updateLeaveRequest(request.id, { status: 'Approved', managerNote: note })}>Approve</button>
+                <button className="btn danger" type="button" onClick={() => updateLeaveRequest(request.id, { status: 'Rejected', managerNote: note })}>Reject</button>
+              </div>
+            ) : (
+              <p className="small muted">This request is locked because it is no longer pending.</p>
+            )}
           </>
         )}
       </div>
@@ -3610,7 +3736,19 @@ function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
   );
 }
 
-function ManagerAdminCategory({ title, note, claims, employees, setReceipt, updateClaim, closeAdmin, showReceiptDownload = false }) {
+function ManagerAdminCategory({
+  title,
+  note,
+  claims,
+  employees,
+  setReceipt,
+  updateClaim,
+  closeAdmin,
+  setTab,
+  currentTab,
+  approvalCounts,
+  showReceiptDownload = false
+}) {
   const [mode, setMode] = useState('approval');
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -3663,6 +3801,8 @@ function ManagerAdminCategory({ title, note, claims, employees, setReceipt, upda
 
   return (
     <div className="space-y">
+      <ApprovalDashboardNav setTab={setTab} currentTab={currentTab} counts={approvalCounts} />
+
       <div className="card">
         <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div>
@@ -3764,6 +3904,16 @@ function ManagerAdminCategory({ title, note, claims, employees, setReceipt, upda
                 <p className="small muted">Showing {mode === 'approval' ? 'pending approval' : 'history'} records that match the current search.</p>
               </div>
               <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+                <select
+                  className="select"
+                  value={selectedEmployeeId}
+                  onChange={event => setSelectedEmployeeId(event.target.value)}
+                  style={{ maxWidth: 220 }}
+                >
+                  {employeeRows.map(employee => (
+                    <option key={employee.id} value={employee.id}>{employee.name}</option>
+                  ))}
+                </select>
                 <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
                 <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
               </div>
