@@ -1244,6 +1244,7 @@ export default function App() {
               title="Timesheet Admin"
               note="Review and approve employee timesheet applications."
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet')}
+              employees={employees}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => setTab('dashboard')}
@@ -1294,6 +1295,7 @@ export default function App() {
               title="Expense Admin"
               note="Review expense claims and download all uploaded receipt proof."
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'expense')}
+              employees={employees}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => setTab('dashboard')}
@@ -1327,6 +1329,20 @@ export default function App() {
 
 
         {tab === 'annualLeave' && (
+          activeUser.role === 'Manager' && managerDataMode === 'overall' ? (
+            <ManagerAnnualLeaveAdmin
+              leaveRequests={visibleLeaveRequests}
+              employees={employees}
+              updateLeaveRequest={updateLeaveRequest}
+              closeAdmin={() => setTab('dashboard')}
+              alMonth={alMonth}
+              setAlMonth={setAlMonth}
+              alBlanks={alBlanks}
+              alDays={alDays}
+              leaveRequestsForDate={leaveRequestsForDate}
+              highlightedLeaveId={highlightedLeaveId}
+            />
+          ) : (
           <div className="space-y">
             <div className="card">
               <div className="card-content flex justify-between gap items-center" style={{ flexWrap: 'wrap' }}>
@@ -1513,6 +1529,7 @@ export default function App() {
               </div>
             </div>
           </div>
+          )
         )}
 
         {tab === 'history' && (
@@ -3208,6 +3225,304 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
   );
 }
 
+function ManagerAnnualLeaveAdmin({
+  leaveRequests,
+  employees,
+  updateLeaveRequest,
+  closeAdmin,
+  alMonth,
+  setAlMonth,
+  alBlanks,
+  alDays,
+  leaveRequestsForDate,
+  highlightedLeaveId
+}) {
+  const [mode, setMode] = useState('approval');
+  const [searchText, setSearchText] = useState('');
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+
+  const matchesSearch = (request) => {
+    const haystack = [
+      request.employeeName,
+      request.startDate,
+      request.endDate,
+      request.status,
+      request.reason,
+      request.managerNote
+    ].join(' ').toLowerCase();
+
+    return haystack.includes(searchText.toLowerCase());
+  };
+
+  const pendingRequests = leaveRequests.filter(request => request.status === 'Submitted');
+  const visibleRequests = leaveRequests
+    .filter(request => mode === 'approval' ? request.status === 'Submitted' : request.status !== 'Submitted')
+    .filter(matchesSearch);
+  const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
+  const selectedEmployeeRequests = selectedEmployeeId
+    ? visibleRequests.filter(request => request.employeeId === selectedEmployeeId)
+    : [];
+
+  const employeeRows = employees
+    .filter(employee => employee.role !== 'Manager')
+    .map(employee => {
+      const employeeRequests = leaveRequests.filter(request => employee.id === request.employeeId);
+      return {
+        ...employee,
+        total: employeeRequests.length,
+        pending: employeeRequests.filter(request => request.status === 'Submitted').length,
+        approved: employeeRequests.filter(request => request.status === 'Approved').length,
+        rejected: employeeRequests.filter(request => request.status === 'Rejected').length
+      };
+    });
+
+  return (
+    <div className="space-y">
+      <div className="card">
+        <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <p className="small muted">Approval Dashboard</p>
+            <h2>Annual Leave Requests</h2>
+            <p className="small muted">Review AL requests first. Open an employee to see the calendar and full AL history.</p>
+          </div>
+
+          <button className="btn secondary" type="button" onClick={closeAdmin}>
+            Back to Approval Dashboard
+          </button>
+        </div>
+      </div>
+
+      <div className={`card ${pendingRequests.length ? '' : ''}`}>
+        <div className="card-content">
+          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <p className="small muted">Pending Card</p>
+              <h2>{pendingRequests.length} AL request(s) waiting</h2>
+            </div>
+            <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
+              <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
+              <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
+            </div>
+          </div>
+
+          <div className="flex gap items-center" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+            <Search size={16} />
+            <input
+              className="input"
+              style={{ maxWidth: 420 }}
+              placeholder="Search employee, date, status or note..."
+              value={searchText}
+              onChange={event => setSearchText(event.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {!selectedEmployeeId ? (
+        <div className="card">
+          <div className="card-content">
+            <h2>Employee Summary</h2>
+            <p className="small muted">Open an employee to view their calendar and full annual leave data.</p>
+            <div className="wide" style={{ marginTop: 14 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th>Pending</th>
+                    <th>Approved</th>
+                    <th>Rejected</th>
+                    <th>Total</th>
+                    <th>Full Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employeeRows.map(employee => (
+                    <tr key={employee.id}>
+                      <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                      <td>{employee.department}</td>
+                      <td>{employee.pending}</td>
+                      <td>{employee.approved}</td>
+                      <td>{employee.rejected}</td>
+                      <td>{employee.total}</td>
+                      <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Employee Full Data</p>
+                <h2>{selectedEmployee?.name || 'Employee'} Annual Leave</h2>
+              </div>
+              <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+                <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
+                <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
+              </div>
+            </div>
+          </div>
+
+          <AnnualLeaveCalendar
+            alBlanks={alBlanks}
+            alDays={alDays}
+            leaveRequestsForDate={(day) => leaveRequestsForDate(day).filter(request => request.employeeId === selectedEmployeeId)}
+            readOnly
+          />
+
+          <AnnualLeaveRequestTable
+            requests={selectedEmployeeRequests}
+            updateLeaveRequest={updateLeaveRequest}
+            highlightedLeaveId={highlightedLeaveId}
+            manager
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AnnualLeaveCalendar({ alBlanks, alDays, leaveRequestsForDate, readOnly = false, alForm = {}, selectAnnualLeaveDate }) {
+  return (
+    <div className="card">
+      <div className="card-content">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 8, textAlign: 'center' }}>
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <b key={d} className="small muted">{d}</b>)}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+          {alBlanks.map((_, i) => <div key={`blank-${i}`} />)}
+          {alDays.map(day => {
+            const key = formatISODateLocal(day);
+            const items = leaveRequestsForDate(day);
+            const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+            const isSelected = alForm.startDate && alForm.endDate && key >= alForm.startDate && key <= alForm.endDate;
+
+            return (
+              <button
+                type="button"
+                key={key}
+                onClick={() => {
+                  if (!readOnly && selectAnnualLeaveDate) selectAnnualLeaveDate(day);
+                }}
+                style={{
+                  minHeight: 92,
+                  textAlign: 'left',
+                  padding: 8,
+                  borderRadius: 14,
+                  border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
+                  background: isSelected ? '#dbeafe' : isWeekend ? '#f1f5f9' : '#ffffff',
+                  cursor: readOnly ? 'default' : 'pointer'
+                }}
+              >
+                <b>{day.getDate()}</b>
+                {isWeekend && <div className="xsmall muted">Weekend</div>}
+                <div className="space-y-sm" style={{ marginTop: 6 }}>
+                  {items.slice(0, 2).map(item => (
+                    <div key={item.id} className={`badge ${item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
+                      {item.employeeName} · {item.duration === 'half' ? 'Half day' : 'AL'} · {item.status}
+                    </div>
+                  ))}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AnnualLeaveRequestTable({ requests, updateLeaveRequest, highlightedLeaveId, manager = false, canEmployeeCancel, cancelLeaveRequest }) {
+  const [notes, setNotes] = useState({});
+
+  if (!requests.length) {
+    return (
+      <div className="card">
+        <div className="card-content muted">No annual leave requests yet.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <div className="card-content">
+        <h2>Annual Leave Requests</h2>
+        <div className="wide">
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Dates</th>
+                <th>Duration</th>
+                <th>Days</th>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Manager Note</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map(request => {
+                const isLocked = request.status === 'Approved';
+                const canManagerAction = manager && request.status === 'Submitted';
+                const noteValue = notes[request.id] ?? request.managerNote ?? '';
+
+                return (
+                  <tr
+                    key={request.id}
+                    id={`leave-row-${request.id}`}
+                    style={highlightedLeaveId === request.id ? { background: '#dbeafe' } : undefined}
+                  >
+                    <td>{request.employeeName}</td>
+                    <td>{request.startDate} {'->'} {request.endDate}</td>
+                    <td>{request.duration === 'half' ? 'Half day' : 'Full day'}</td>
+                    <td>{calculateLeaveDays(request)}</td>
+                    <td><span className={`badge ${request.status}`}>{request.status}</span></td>
+                    <td>
+                      {request.reason || '—'}
+                      {isLocked && <div className="xsmall muted">Locked after approval</div>}
+                    </td>
+                    <td>
+                      {canManagerAction ? (
+                        <textarea
+                          className="textarea"
+                          placeholder="Note / reject reason"
+                          value={noteValue}
+                          onChange={event => setNotes(prev => ({ ...prev, [request.id]: event.target.value }))}
+                        />
+                      ) : (
+                        request.managerNote || '—'
+                      )}
+                    </td>
+                    <td>
+                      {canManagerAction ? (
+                        <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+                          <button className="btn" onClick={() => updateLeaveRequest(request.id, { status: 'Approved', managerNote: noteValue })}>Approve</button>
+                          <button className="btn danger" onClick={() => updateLeaveRequest(request.id, { status: 'Rejected', managerNote: noteValue })}>Reject</button>
+                        </div>
+                      ) : canEmployeeCancel?.(request) ? (
+                        <button className="btn secondary" onClick={() => cancelLeaveRequest(request.id)}>Cancel Request</button>
+                      ) : (
+                        <span className="small muted">Locked</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
   const isExpense = claimTypeOf(claim) === 'expense';
 
@@ -3240,8 +3555,56 @@ function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
   );
 }
 
-function ManagerAdminCategory({ title, note, claims, setReceipt, updateClaim, closeAdmin, showReceiptDownload = false }) {
+function ManagerAdminCategory({ title, note, claims, employees, setReceipt, updateClaim, closeAdmin, showReceiptDownload = false }) {
+  const [mode, setMode] = useState('approval');
+  const [searchText, setSearchText] = useState('');
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const receiptItems = receiptDownloadItemsFromClaims(claims);
+  const isExpenseAdmin = claims.some(claim => claimTypeOf(claim) === 'expense');
+  const pendingClaims = claims.filter(claim => claim.status === 'Submitted');
+  const matchesSearch = (claim) => {
+    const haystack = [
+      claim.employeeName,
+      claim.email,
+      claim.department,
+      claim.status,
+      claim.week,
+      claim.weekLabel,
+      claim.expenseMonth,
+      claim.periodLabel,
+      claim.managerNote,
+      claim.expenses?.map(expense => [expense.category, expense.projectName, expense.description].join(' ')).join(' ')
+    ].join(' ').toLowerCase();
+
+    return haystack.includes(searchText.toLowerCase());
+  };
+  const visibleClaims = claims
+    .filter(claim => mode === 'approval' ? claim.status === 'Submitted' : claim.status !== 'Submitted')
+    .filter(matchesSearch);
+  const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
+  const selectedEmployeeClaims = selectedEmployeeId
+    ? visibleClaims.filter(claim => claim.employeeId === selectedEmployeeId)
+    : [];
+  const employeeRows = employees
+    .filter(employee => employee.role !== 'Manager')
+    .map(employee => {
+      const employeeClaims = claims.filter(claim => claim.employeeId === employee.id);
+      const pending = employeeClaims.filter(claim => claim.status === 'Submitted').length;
+      const approved = employeeClaims.filter(claim => ['Approved', 'Paid'].includes(claim.status)).length;
+      const rejected = employeeClaims.filter(claim => claim.status === 'Rejected').length;
+      const totalAmount = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
+      const totalHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalWorkingHours || 0), 0);
+
+      return {
+        ...employee,
+        total: employeeClaims.length,
+        pending,
+        approved,
+        rejected,
+        totalAmount,
+        totalHours
+      };
+    });
 
   return (
     <div className="space-y">
@@ -3271,12 +3634,92 @@ function ManagerAdminCategory({ title, note, claims, setReceipt, updateClaim, cl
         </div>
       </div>
 
-      <ClaimList
-        claims={claims}
-        setReceipt={setReceipt}
-        manager
-        updateClaim={updateClaim}
-      />
+      <div className="card">
+        <div className="card-content">
+          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <p className="small muted">Pending Card</p>
+              <h2>{pendingClaims.length} {isExpenseAdmin ? 'expense' : 'timesheet'} application(s) waiting</h2>
+              <p className="small muted">{note}</p>
+            </div>
+            <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
+              <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
+              <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
+            </div>
+          </div>
+
+          <div className="flex gap items-center" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+            <Search size={16} />
+            <input
+              className="input"
+              style={{ maxWidth: 440 }}
+              placeholder="Search employee, period, project, category or note..."
+              value={searchText}
+              onChange={event => setSearchText(event.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {!selectedEmployeeId ? (
+        <div className="card">
+          <div className="card-content">
+            <h2>Employee Summary</h2>
+            <p className="small muted">Open an employee to view full {isExpenseAdmin ? 'expense' : 'timesheet'} data and approval detail.</p>
+
+            <div className="wide" style={{ marginTop: 14 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th>Pending</th>
+                    <th>Approved/Paid</th>
+                    <th>Rejected</th>
+                    <th>{isExpenseAdmin ? 'Total Claims' : 'Total Hours'}</th>
+                    <th>Total Records</th>
+                    <th>Full Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employeeRows.map(employee => (
+                    <tr key={employee.id}>
+                      <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                      <td>{employee.department}</td>
+                      <td>{employee.pending}</td>
+                      <td>{employee.approved}</td>
+                      <td>{employee.rejected}</td>
+                      <td>{isExpenseAdmin ? money(employee.totalAmount) : `${employee.totalHours.toFixed(2)} hrs`}</td>
+                      <td>{employee.total}</td>
+                      <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Employee Full Data</p>
+                <h2>{selectedEmployee?.name || 'Employee'} {isExpenseAdmin ? 'Expense' : 'Timesheet'} Applications</h2>
+                <p className="small muted">Showing {mode === 'approval' ? 'pending approval' : 'history'} records that match the current search.</p>
+              </div>
+              <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
+            </div>
+          </div>
+
+          <ClaimList
+            claims={selectedEmployeeClaims}
+            setReceipt={setReceipt}
+            manager
+            updateClaim={updateClaim}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -3327,6 +3770,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                     <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
                     <Mini label="Items" value={String(c.expenses?.length || 0)} />
                     <Mini label="Status" value={c.status} />
+                    <Mini label="Company Approved Amount" value={c.approvedAmount === undefined || c.approvedAmount === '' ? '—' : money(c.approvedAmount)} />
                   </div>
 
                   <div className="wide">
@@ -3418,15 +3862,62 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                   <label className="label">Manager Note</label>
                   <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />
 
-                  <button className="btn" onClick={() => updateClaim(c.id, { status: 'Approved' })}>
+                  {isExpense && (
+                    <div className="grid grid-2" style={{ alignItems: 'end' }}>
+                      <label className="flex gap items-center" style={{ background: 'white', border: '1px solid #cbd5e1', borderRadius: 12, padding: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={c.companyPaidFull !== false}
+                          onChange={event => updateClaim(c.id, {
+                            companyPaidFull: event.target.checked,
+                            approvedAmount: event.target.checked ? Number(c.totals?.totalExpense || 0) : (c.approvedAmount || '')
+                          })}
+                        />
+                        <span>
+                          <b>Paid / approve full application amount</b>
+                          <br />
+                          <span className="xsmall muted">Untick to manually enter a different company approved amount.</span>
+                        </span>
+                      </label>
+
+                      <Field
+                        label="Approved Amount"
+                        type="number"
+                        disabled={c.companyPaidFull !== false}
+                        value={c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : (c.approvedAmount || '')}
+                        onChange={value => updateClaim(c.id, { approvedAmount: value, companyPaidFull: false })}
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    className="btn"
+                    onClick={() => updateClaim(c.id, {
+                      status: 'Approved',
+                      approvedAmount: isExpense && c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : c.approvedAmount
+                    })}
+                  >
                     <CheckCircle2 size={16} /> Approve
                   </button>
                   {' '}
-                  <button className="btn danger" onClick={() => updateClaim(c.id, { status: 'Rejected' })}>
+                  <button
+                    className="btn danger"
+                    onClick={() => updateClaim(c.id, {
+                      status: 'Rejected',
+                      approvedAmount: isExpense && c.companyPaidFull !== false ? 0 : c.approvedAmount
+                    })}
+                  >
                     <XCircle size={16} /> Reject
                   </button>
                   {' '}
-                  <button className="btn secondary" onClick={() => updateClaim(c.id, { status: 'Paid' })}>
+                  <button
+                    className="btn secondary"
+                    onClick={() => updateClaim(c.id, {
+                      status: 'Paid',
+                      companyPaidFull: isExpense ? c.companyPaidFull !== false : c.companyPaidFull,
+                      approvedAmount: isExpense && c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : c.approvedAmount
+                    })}
+                  >
                     Mark as Paid
                   </button>
                 </div>
