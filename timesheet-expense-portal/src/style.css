@@ -48,7 +48,7 @@ th { color: #64748b; font-weight: 700; }
 .badge.Rejected { background: #ffe4e6; color: #be123c; }
 .badge.Paid { background: #ede9fe; color: #6d28d9; }
 .receipt-thumb { max-height: 380px; width: 100%; object-fit: contain; border-radius: 18px; }
-.expense-row { grid-template-columns: 1fr 1fr 1fr 1fr 1fr 2fr 120px auto; align-items: center; }
+.expense-row { grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1.2fr 1.6fr 120px auto; align-items: center; }
 .receipt-proof-cell { min-height: 42px; display: flex; align-items: center; }
 .receipt-proof { position: relative; display: inline-flex; }
 .receipt-proof-trigger { color: #047857; border-color: #86efac; background: #f0fdf4; min-width: 48px; }

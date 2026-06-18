@@ -144,6 +144,7 @@ function makeExpense() {
   return {
     id: crypto.randomUUID(),
     date: '',
+    projectName: '',
     category: 'Travel',
     description: '',
     amount: '',
@@ -345,25 +346,25 @@ function sanitizeFilenamePart(value) {
 }
 
 function receiptDownloadItemsFromClaims(claims) {
-  return uniqueClaimsByEmployeeWeekType(claims || [])
+  const receiptItems = uniqueClaimsByEmployeeWeekType(claims || [])
     .filter(claim => claimTypeOf(claim) === 'expense')
     .flatMap(claim => (claim.expenses || [])
       .filter(expense => expense.receiptName && expense.receiptPreview)
-      .map((expense, index) => {
-        const period = claim.periodLabel || monthLabel(getClaimExpenseMonth(claim));
-        const nameParts = [
-          sanitizeFilenamePart(claim.employeeName),
-          sanitizeFilenamePart(period),
-          sanitizeFilenamePart(expense.category || 'Expense'),
-          String(index + 1).padStart(2, '0'),
-          sanitizeFilenamePart(expense.receiptName)
-        ];
+      .map(expense => ({ claim, expense })));
 
-        return {
-          href: expense.receiptPreview,
-          filename: nameParts.join('_')
-        };
-      }));
+  return receiptItems.map(({ claim, expense }, index) => {
+    const datePart = sanitizeFilenamePart(
+      (expense.date || claim.expenseMonth || getClaimExpenseMonth(claim) || 'no-date').replaceAll('-', '_')
+    );
+    const categoryPart = sanitizeFilenamePart(expense.category || 'Expense');
+    const projectPart = sanitizeFilenamePart(expense.projectName || expense.description || claim.employeeName || 'PJ');
+    const originalExtension = String(expense.receiptName || '').match(/\.[a-z0-9]+$/i)?.[0] || '';
+
+    return {
+      href: expense.receiptPreview,
+      filename: `${datePart}_${categoryPart}_${projectPart}_${String(index + 1).padStart(3, '0')}${originalExtension}`
+    };
+  });
 }
 
 function downloadReceiptItems(items) {
@@ -574,6 +575,32 @@ export default function App() {
     () => getDashboardSummary(companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests),
     [companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests]
   );
+  const companyAlSubmitted = companyTopCardLeaveRequests.filter(request => request.status === 'Submitted').length;
+  const companyAlApproved = companyTopCardLeaveRequests.filter(request => request.status === 'Approved').length;
+  const companyTilByEmployee = employees
+    .filter(employee => employee.role !== 'Manager')
+    .map(employee => {
+      const employeeClaims = companyTopCardClaims.filter(claim => claim.employeeId === employee.id && claimTypeOf(claim) === 'timesheet');
+      const balance = employeeClaims.reduce(
+        (sum, claim) => sum + Number(claim.totals?.timeInLieu || 0) - Number(claim.totals?.takeBackTimeInLieu || 0),
+        0
+      );
+
+      return { name: employee.name, balance };
+    })
+    .filter(item => item.balance > 0);
+  const companyTilTotal = companyTilByEmployee.reduce((sum, item) => sum + item.balance, 0);
+  const companyTilSummary = companyTilByEmployee.length
+    ? companyTilByEmployee.map(item => `${item.name}: ${item.balance.toFixed(2)}h`).join(' | ')
+    : 'No employee TIL balance';
+  const companyExpenseClaimsForCards = companyTopCardClaims.filter(claim => claimTypeOf(claim) === 'expense');
+  const companyExpenseSubmittedTotal = companyExpenseClaimsForCards
+    .filter(claim => claim.status === 'Submitted')
+    .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
+  const companyExpenseApprovedTotal = companyExpenseClaimsForCards
+    .filter(claim => claim.status === 'Approved')
+    .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
+  const companyExpensePendingTotal = companyExpenseSubmittedTotal + companyExpenseApprovedTotal;
   const summaryCardsMode = activeUser.role === 'Manager' ? managerDataMode : 'personal';
   const summaryCardsData = summaryCardsMode === 'overall' ? companyTopCardSummary : topCardSummary;
   const reviewingClaim = reviewingClaimId
@@ -582,7 +609,7 @@ export default function App() {
   const managerPersonalMode = activeUser.role === 'Manager' && managerDataMode === 'personal';
   const visibleTabs = activeUser.role === 'Manager'
     ? managerDataMode === 'overall'
-      ? ['dashboard', 'history']
+      ? ['dashboard', 'timesheet', 'expense', 'annualLeave']
       : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history']
     : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history'];
 
@@ -1073,21 +1100,6 @@ export default function App() {
                 </select>
               </div>
 
-              {activeUser.role === 'Manager' && managerDataMode === 'overall' && (
-                <div>
-                  <label className="label" style={{ color: '#cbd5e1' }}>View data</label>
-                  <select
-                    className="select"
-                    value={viewEmployeeId}
-                    onChange={e => setViewEmployeeId(e.target.value)}
-                  >
-                    <option value="All">All Employees</option>
-                    {employees.filter(u => u.role !== 'Manager').map(u => (
-                      <option key={u.id} value={u.id}>{u.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </div>
           </div>
         </motion.header>
@@ -1138,32 +1150,38 @@ export default function App() {
         <div className="grid grid-4">
           <Metric
             label={activeUser.role === 'Manager'
-              ? summaryCardsMode === 'overall' ? 'Company AL Remaining' : 'Personal Annual Leave'
+              ? summaryCardsMode === 'overall' ? 'Company AL Applications' : 'Personal Annual Leave'
               : 'Annual Leave Remaining'}
-            value={`${summaryCardsData.annualLeaveRemaining} / ${summaryCardsData.annualLeaveTotal} days`}
+            value={activeUser.role === 'Manager' && summaryCardsMode === 'overall'
+              ? `${companyAlSubmitted} pending`
+              : `${summaryCardsData.annualLeaveRemaining} / ${summaryCardsData.annualLeaveTotal} days`}
             sub={activeUser.role === 'Manager'
-              ? summaryCardsMode === 'overall' ? 'All employees approved AL' : 'Boss personal status only'
+              ? summaryCardsMode === 'overall' ? `${companyAlApproved} approved | ${companyTopCardLeaveRequests.length} total AL application(s)` : 'Boss personal status only'
               : 'Quick status'}
             icon={<CalendarDays />}
           />
           <Metric
             label={activeUser.role === 'Manager'
-              ? summaryCardsMode === 'overall' ? 'Company Time in Lieu' : 'Personal Time in Lieu'
+              ? summaryCardsMode === 'overall' ? 'Employees With TIL' : 'Personal Time in Lieu'
               : 'Time in Lieu Remaining'}
-            value={`${summaryCardsData.timeInLieuRemaining.toFixed(2)} hrs`}
+            value={activeUser.role === 'Manager' && summaryCardsMode === 'overall'
+              ? `${companyTilTotal.toFixed(2)} hrs`
+              : `${summaryCardsData.timeInLieuRemaining.toFixed(2)} hrs`}
             sub={activeUser.role === 'Manager'
-              ? summaryCardsMode === 'overall' ? 'All employees cumulative TIL' : 'Boss personal status only'
+              ? summaryCardsMode === 'overall' ? companyTilSummary : 'Boss personal status only'
               : 'Quick status'}
             icon={<FileCheck2 />}
           />
           <Metric
             label={activeUser.role === 'Manager'
-              ? summaryCardsMode === 'overall' ? 'Company Total Expense' : 'Personal Total Expense'
+              ? summaryCardsMode === 'overall' ? 'Company Expense Pending' : 'Personal Total Expense'
               : 'Total Expense'}
-            value={money(summaryCardsData.outstandingExpenses)}
+            value={activeUser.role === 'Manager' && summaryCardsMode === 'overall'
+              ? money(companyExpensePendingTotal)
+              : money(summaryCardsData.outstandingExpenses)}
             sub={activeUser.role === 'Manager'
               ? summaryCardsMode === 'overall'
-                ? `Company claims ${money(summaryCardsData.totalExpenseClaims)} - approved/paid ${money(summaryCardsData.approvedPaidExpenses)}`
+                ? `Submitted ${money(companyExpenseSubmittedTotal)} | Approved unpaid ${money(companyExpenseApprovedTotal)}`
                 : `Personal claims ${money(summaryCardsData.totalExpenseClaims)} - approved/paid ${money(summaryCardsData.approvedPaidExpenses)}`
               : `All claims ${money(summaryCardsData.totalExpenseClaims)} - approved/paid ${money(summaryCardsData.approvedPaidExpenses)}`}
             icon={<ReceiptText />}
@@ -1219,7 +1237,7 @@ export default function App() {
         )}
 
         {tab === 'timesheet' && (
-          activeUser.role === 'Manager' && reviewingClaim && claimTypeOf(reviewingClaim) === 'timesheet' ? (
+          activeUser.role === 'Manager' && managerDataMode === 'overall' && reviewingClaim && claimTypeOf(reviewingClaim) === 'timesheet' ? (
             <ManagerClaimReview
               claim={reviewingClaim}
               updateClaim={updateClaim}
@@ -1228,6 +1246,14 @@ export default function App() {
                 setReviewingClaimId(null);
                 setTab('dashboard');
               }}
+            />
+          ) : activeUser.role === 'Manager' && managerDataMode === 'overall' ? (
+            <ManagerAdminCategory
+              title="Timesheet Admin"
+              note="Review and approve employee timesheet applications."
+              claims={accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet')}
+              setReceipt={setReceipt}
+              updateClaim={updateClaim}
             />
           ) : (
             <TimesheetForm
@@ -1260,7 +1286,7 @@ export default function App() {
         )}
 
         {tab === 'expense' && (
-          activeUser.role === 'Manager' && reviewingClaim && claimTypeOf(reviewingClaim) === 'expense' ? (
+          activeUser.role === 'Manager' && managerDataMode === 'overall' && reviewingClaim && claimTypeOf(reviewingClaim) === 'expense' ? (
             <ManagerClaimReview
               claim={reviewingClaim}
               updateClaim={updateClaim}
@@ -1269,6 +1295,15 @@ export default function App() {
                 setReviewingClaimId(null);
                 setTab('dashboard');
               }}
+            />
+          ) : activeUser.role === 'Manager' && managerDataMode === 'overall' ? (
+            <ManagerAdminCategory
+              title="Expense Admin"
+              note="Review expense claims and download all uploaded receipt proof."
+              claims={accountClaims.filter(claim => claimTypeOf(claim) === 'expense')}
+              setReceipt={setReceipt}
+              updateClaim={updateClaim}
+              showReceiptDownload
             />
           ) : (
             <ExpenseForm
@@ -1303,7 +1338,11 @@ export default function App() {
               <div className="card-content flex justify-between gap items-center" style={{ flexWrap: 'wrap' }}>
                 <div>
                   <h2>Annual Leave Calendar</h2>
-                  <p className="small muted">Click a date to apply AL. Manager approval deducts from Annual Leave Remaining.</p>
+                  <p className="small muted">
+                    {activeUser.role === 'Manager' && managerDataMode === 'overall'
+                      ? 'Admin view for company annual leave applications.'
+                      : 'Click a date to apply AL. Manager approval deducts from Annual Leave Remaining.'}
+                  </p>
                 </div>
                 <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
                   <button className="btn secondary" type="button" onClick={findPreviousAnnualLeave}>
@@ -1339,7 +1378,11 @@ export default function App() {
                         <button
                           type="button"
                           key={key}
-                          onClick={() => selectAnnualLeaveDate(day)}
+                          onClick={() => {
+                            if (!(activeUser.role === 'Manager' && managerDataMode === 'overall')) {
+                              selectAnnualLeaveDate(day);
+                            }
+                          }}
                           style={{
                             minHeight: 92,
                             textAlign: 'left',
@@ -1347,7 +1390,7 @@ export default function App() {
                             borderRadius: 14,
                             border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
                             background: isSelected ? '#dbeafe' : isWeekend ? '#f1f5f9' : '#ffffff',
-                            cursor: 'pointer'
+                            cursor: activeUser.role === 'Manager' && managerDataMode === 'overall' ? 'default' : 'pointer'
                           }}
                         >
                           <b>{day.getDate()}</b>
@@ -1366,6 +1409,7 @@ export default function App() {
                 </div>
               </div>
 
+              {!(activeUser.role === 'Manager' && managerDataMode === 'overall') && (
               <div className="card">
                 <div className="card-content space-y-sm">
                   <h2>Apply Annual Leave</h2>
@@ -1401,6 +1445,7 @@ export default function App() {
                   <button className="btn" onClick={submitAnnualLeave}>Submit Annual Leave</button>
                 </div>
               </div>
+              )}
             </div>
 
             <div className="card">
@@ -2804,6 +2849,7 @@ function ExpenseForm(p) {
                 disabled={!vatIsCustom}
                 onChange={ev => p.updateExpense(i, 'vat', ev.target.value)}
               />
+              <input className="input" placeholder="PJ name" value={e.projectName || ''} onChange={ev => p.updateExpense(i, 'projectName', ev.target.value)} />
               <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
 
               <div className="receipt-proof-cell">
@@ -3001,6 +3047,42 @@ function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
   );
 }
 
+function ManagerAdminCategory({ title, note, claims, setReceipt, updateClaim, showReceiptDownload = false }) {
+  const receiptItems = receiptDownloadItemsFromClaims(claims);
+
+  return (
+    <div className="space-y">
+      <div className="card">
+        <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <p className="small muted">Approval Dashboard</p>
+            <h2>{title}</h2>
+            <p className="small muted">{note}</p>
+          </div>
+
+          {showReceiptDownload && (
+            <button
+              className="btn secondary"
+              type="button"
+              disabled={receiptItems.length === 0}
+              onClick={() => downloadReceiptItems(receiptItems)}
+            >
+              Download All Receipt Proofs ({receiptItems.length})
+            </button>
+          )}
+        </div>
+      </div>
+
+      <ClaimList
+        claims={claims}
+        setReceipt={setReceipt}
+        manager
+        updateClaim={updateClaim}
+      />
+    </div>
+  );
+}
+
 function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, activeUser }) {
   if (!claims.length) {
     return (
@@ -3055,6 +3137,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                         <tr>
                           <th>Date</th>
                           <th>Category</th>
+                          <th>PJ Name</th>
                           <th>Description</th>
                           <th>Amount</th>
                           <th>VAT</th>
@@ -3067,6 +3150,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                           <tr key={e.id}>
                             <td>{e.date || '—'}</td>
                             <td>{e.category}</td>
+                            <td>{e.projectName || '—'}</td>
                             <td>{e.description || '—'}</td>
                             <td><b>{money(e.amount)}</b></td>
                             <td><b>{money(e.vat)}</b></td>
