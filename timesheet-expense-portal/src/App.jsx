@@ -609,7 +609,7 @@ export default function App() {
   const managerPersonalMode = activeUser.role === 'Manager' && managerDataMode === 'personal';
   const visibleTabs = activeUser.role === 'Manager'
     ? managerDataMode === 'overall'
-      ? ['dashboard', 'timesheet', 'expense', 'annualLeave']
+      ? []
       : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history']
     : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history'];
 
@@ -1082,6 +1082,24 @@ export default function App() {
                 Weekly timesheets, time in lieu carry-forward, receipt expenses,
                 manager approval and reporting dashboard.
               </p>
+              {activeUser.role === 'Manager' && (
+                <div className="manager-mode-switch">
+                  <button
+                    className={managerDataMode === 'overall' ? 'active' : ''}
+                    type="button"
+                    onClick={() => switchManagerDataMode('overall')}
+                  >
+                    Approval Dashboard
+                  </button>
+                  <button
+                    className={managerDataMode === 'personal' ? 'active' : ''}
+                    type="button"
+                    onClick={() => switchManagerDataMode('personal')}
+                  >
+                    My Input
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex gap" style={{ flexWrap: 'wrap' }}>
@@ -1104,36 +1122,6 @@ export default function App() {
           </div>
         </motion.header>
 
-        {activeUser.role === 'Manager' && (
-          <div className="grid grid-2">
-            <button
-              className={`mode-card ${managerDataMode === 'overall' ? 'active' : ''}`}
-              type="button"
-              onClick={() => switchManagerDataMode('overall')}
-            >
-              <div>
-                <p className="small muted">Overall Company Data</p>
-                <h2>Approval Dashboard</h2>
-                <p className="small muted">Review all employees, approve applications, manage receipts and company expense totals.</p>
-              </div>
-              <span className={`badge ${managerDataMode === 'overall' ? 'Submitted' : ''}`}>Company</span>
-            </button>
-
-            <button
-              className={`mode-card ${managerDataMode === 'personal' ? 'active' : ''}`}
-              type="button"
-              onClick={() => switchManagerDataMode('personal')}
-            >
-              <div>
-                <p className="small muted">Personal Data</p>
-                <h2>My Input Forms</h2>
-                <p className="small muted">Enter Boss personal timesheet, expense and annual leave data only.</p>
-              </div>
-              <span className={`badge ${managerDataMode === 'personal' ? 'Approved' : ''}`}>Personal</span>
-            </button>
-          </div>
-        )}
-
         {activeUser.role === 'Manager' && managerDataMode === 'personal' && (
           <div className="card">
             <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -1147,6 +1135,7 @@ export default function App() {
           </div>
         )}
 
+        {!(activeUser.role === 'Manager' && managerDataMode === 'overall') && (
         <div className="grid grid-4">
           <Metric
             label={activeUser.role === 'Manager'
@@ -1197,7 +1186,9 @@ export default function App() {
             icon={<Users />}
           />
         </div>
+        )}
 
+        {visibleTabs.length > 0 && (
         <div className="tabs">
           <button className="btn danger" onClick={resetDemoData}>Reset Demo Data</button>
           {visibleTabs.map(t => (
@@ -1213,6 +1204,7 @@ export default function App() {
             </button>
           ))}
         </div>
+        )}
 
         {tab === 'dashboard' && (
           <Dashboard
@@ -1254,6 +1246,7 @@ export default function App() {
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet')}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
+              closeAdmin={() => setTab('dashboard')}
             />
           ) : (
             <TimesheetForm
@@ -1303,6 +1296,7 @@ export default function App() {
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'expense')}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
+              closeAdmin={() => setTab('dashboard')}
               showReceiptDownload
             />
           ) : (
@@ -1345,6 +1339,11 @@ export default function App() {
                   </p>
                 </div>
                 <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+                  {activeUser.role === 'Manager' && managerDataMode === 'overall' && (
+                    <button className="btn secondary" type="button" onClick={() => setTab('dashboard')}>
+                      Back to Approval Dashboard
+                    </button>
+                  )}
                   <button className="btn secondary" type="button" onClick={findPreviousAnnualLeave}>
                     Find Previous AL
                   </button>
@@ -1908,6 +1907,59 @@ function Dashboard({
         </div>
       </div>
 
+      {isManagerOverallDashboard && (
+        <div className="card">
+          <div className="card-content">
+            <div>
+              <p className="small muted">Approval Dashboard</p>
+              <h2>Applications Waiting For Review</h2>
+              <p className="small muted">Open each application database to review details and approve or reject records.</p>
+            </div>
+
+            <div className="grid grid-3" style={{ marginTop: 16 }}>
+              <button
+                className={`approval-tile ${managerApprovalCounts.annualLeave ? 'pending' : ''}`}
+                type="button"
+                onClick={() => setTab('annualLeave')}
+              >
+                <span className="status-light" />
+                <div>
+                  <p className="small muted">Company AL Applications</p>
+                  <h2>{managerApprovalCounts.annualLeave} pending</h2>
+                  <p className="small muted">{(allLeaveRequests || []).length} total annual leave application(s)</p>
+                </div>
+              </button>
+
+              <button
+                className={`approval-tile ${managerApprovalCounts.timesheets ? 'pending' : ''}`}
+                type="button"
+                onClick={() => setTab('timesheet')}
+              >
+                <span className="status-light" />
+                <div>
+                  <p className="small muted">Timesheet Applications</p>
+                  <h2>{managerApprovalCounts.timesheets} pending</h2>
+                  <p className="small muted">{(allEmployeeClaims || []).filter(claim => claimTypeOf(claim) === 'timesheet').length} total timesheet application(s)</p>
+                </div>
+              </button>
+
+              <button
+                className={`approval-tile ${managerApprovalCounts.expenses || approvedExpensesAwaitingPayment.length ? 'pending' : ''}`}
+                type="button"
+                onClick={() => setTab('expense')}
+              >
+                <span className="status-light" />
+                <div>
+                  <p className="small muted">Company Expense Applications</p>
+                  <h2>{managerApprovalCounts.expenses} pending</h2>
+                  <p className="small muted">{approvedExpensesAwaitingPayment.length} approved awaiting payment</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isManagerPersonalDashboard && managerPersonalSummary && isCurrentStatus && (
         <div className="card">
           <div className="card-content space-y-sm">
@@ -1941,7 +1993,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManagerOverallDashboard && (
+      {false && isManagerOverallDashboard && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -2040,7 +2092,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManagerOverallDashboard && (
+      {false && isManagerOverallDashboard && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -2093,7 +2145,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManagerOverallDashboard && approvedExpensesAwaitingPayment.length > 0 && (
+      {false && isManagerOverallDashboard && approvedExpensesAwaitingPayment.length > 0 && (
         <div className="card">
           <div className="card-content">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -2136,7 +2188,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManagerOverallDashboard && selectedBossEmployee && (
+      {false && isManagerOverallDashboard && selectedBossEmployee && (
         <div className="card" id="manager-employee-profile">
           <div className="card-content space-y-sm">
             <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -3047,7 +3099,7 @@ function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
   );
 }
 
-function ManagerAdminCategory({ title, note, claims, setReceipt, updateClaim, showReceiptDownload = false }) {
+function ManagerAdminCategory({ title, note, claims, setReceipt, updateClaim, closeAdmin, showReceiptDownload = false }) {
   const receiptItems = receiptDownloadItemsFromClaims(claims);
 
   return (
@@ -3060,16 +3112,21 @@ function ManagerAdminCategory({ title, note, claims, setReceipt, updateClaim, sh
             <p className="small muted">{note}</p>
           </div>
 
-          {showReceiptDownload && (
-            <button
-              className="btn secondary"
-              type="button"
-              disabled={receiptItems.length === 0}
-              onClick={() => downloadReceiptItems(receiptItems)}
-            >
-              Download All Receipt Proofs ({receiptItems.length})
+          <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+            <button className="btn secondary" type="button" onClick={closeAdmin}>
+              Back to Approval Dashboard
             </button>
-          )}
+            {showReceiptDownload && (
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={receiptItems.length === 0}
+                onClick={() => downloadReceiptItems(receiptItems)}
+              >
+                Download All Receipt Proofs ({receiptItems.length})
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

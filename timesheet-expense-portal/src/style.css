@@ -38,6 +38,13 @@ button, input, textarea, select { font: inherit; }
 .mode-card { text-align: left; width: 100%; background: white; border: 1px solid #e2e8f0; border-radius: 18px; padding: 18px; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
 .mode-card h2 { margin: 4px 0; }
 .mode-card.active { border-color: #0f172a; box-shadow: 0 12px 24px rgba(15,23,42,.12); }
+.manager-mode-switch { display: inline-flex; gap: 4px; margin-top: 18px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(203,213,225,.28); }
+.manager-mode-switch button { border: 0; border-radius: 999px; padding: 7px 12px; cursor: pointer; color: #cbd5e1; background: transparent; font-weight: 800; font-size: 12px; }
+.manager-mode-switch button.active { background: white; color: #020617; }
+.approval-tile { position: relative; text-align: left; width: 100%; min-height: 150px; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 18px 18px 18px 48px; cursor: pointer; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+.approval-tile.pending { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe, 0 18px 30px rgba(37,99,235,.16); }
+.status-light { position: absolute; left: 18px; top: 22px; width: 14px; height: 14px; border-radius: 999px; background: #cbd5e1; }
+.approval-tile.pending .status-light { background: #22c55e; box-shadow: 0 0 0 6px #dcfce7; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
 th { color: #64748b; font-weight: 700; }
