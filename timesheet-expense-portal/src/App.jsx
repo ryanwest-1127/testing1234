@@ -3221,20 +3221,23 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
   );
 }
 
-function ApprovalDashboardNav({ setTab, currentTab, counts = {} }) {
+function ApprovalDashboardNav({ setTab, currentTab, counts = {}, hideBeforeCurrent = false }) {
   const items = [
     { key: 'dashboard', title: 'Dashboard', count: null, note: 'Approval overview' },
     { key: 'annualLeave', title: 'AL Applications', count: counts.annualLeave || 0, note: 'Annual leave requests' },
     { key: 'timesheet', title: 'Timesheet Applications', count: counts.timesheets || 0, note: 'Timesheet submissions' },
     { key: 'expense', title: 'Expense Applications', count: counts.expenses || 0, note: 'Expense claims' }
   ];
+  const visibleItems = hideBeforeCurrent
+    ? items.slice(Math.max(0, items.findIndex(item => item.key === currentTab)))
+    : items;
 
   return (
     <div className="card">
       <div className="card-content">
         <p className="small muted">Approval Dashboard</p>
         <div className="grid grid-4" style={{ marginTop: 12 }}>
-          {items.map(item => (
+          {visibleItems.map(item => (
             <button
               key={item.key}
               type="button"
@@ -3477,6 +3480,17 @@ function ManagerAnnualLeaveAdmin({
 }
 
 function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveRequestsForDate, readOnly = false, alForm = {}, selectAnnualLeaveDate }) {
+  const calendarStart = alDays[0] ? new Date(alDays[0]) : new Date();
+  calendarStart.setDate(calendarStart.getDate() - alBlanks.length);
+  const calendarCells = [
+    ...Array.from({ length: alBlanks.length }, () => null),
+    ...alDays
+  ];
+  const calendarRows = Array.from(
+    { length: Math.ceil(calendarCells.length / 7) },
+    (_, rowIndex) => calendarCells.slice(rowIndex * 7, rowIndex * 7 + 7)
+  );
+
   return (
     <div className="card">
       <div className="card-content">
@@ -3485,13 +3499,23 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
           <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 8, textAlign: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '56px repeat(7, 1fr)', gap: 6, marginBottom: 8, textAlign: 'center' }}>
+          <b className="small muted">Week</b>
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <b key={d} className="small muted">{d}</b>)}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
-          {alBlanks.map((_, i) => <div key={`blank-${i}`} />)}
-          {alDays.map(day => {
+        <div className="al-calendar-grid">
+          {calendarRows.map((row, rowIndex) => {
+            const monday = new Date(calendarStart);
+            monday.setDate(calendarStart.getDate() + rowIndex * 7);
+            const weekNumber = getBusinessWeekNumberFromDate(monday, monday.getFullYear());
+
+            return (
+              <React.Fragment key={`week-${rowIndex}`}>
+                <div className="al-week-number">{weekNumber}</div>
+                {row.map((day, dayIndex) => {
+                  if (!day) return <div key={`blank-${rowIndex}-${dayIndex}`} />;
+
             const key = formatISODateLocal(day);
             const items = leaveRequestsForDate(day);
             const isWeekend = day.getDay() === 0 || day.getDay() === 6;
@@ -3528,6 +3552,9 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
                   ))}
                 </div>
               </button>
+            );
+                })}
+              </React.Fragment>
             );
           })}
         </div>
@@ -3780,7 +3807,7 @@ function ManagerAdminCategory({
         .filter(claim => claim.employeeId === selectedEmployeeId)
         .sort((a, b) => isExpenseAdmin
           ? String(getClaimExpenseMonth(b)).localeCompare(String(getClaimExpenseMonth(a)))
-          : String(b.week || '').localeCompare(String(a.week || '')))
+          : String(a.week || '').localeCompare(String(b.week || '')))
     : [];
   const selectedEmployeeSelectedClaim = selectedEmployeeClaims.find(claim => claim.id === selectedClaimId) ||
     selectedEmployeeClaims[0] ||
@@ -3820,7 +3847,12 @@ function ManagerAdminCategory({
 
   return (
     <div className="space-y">
-      <ApprovalDashboardNav setTab={setTab} currentTab={currentTab} counts={approvalCounts} />
+      <ApprovalDashboardNav
+        setTab={setTab}
+        currentTab={currentTab}
+        counts={approvalCounts}
+        hideBeforeCurrent={currentTab === 'timesheet'}
+      />
 
       {!selectedEmployeeId ? (
         <div className="card">
@@ -4009,6 +4041,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
   const selectedIndex = Math.max(0, claims.findIndex(item => item.id === selectedClaimId));
   const canMovePrevious = claims.length > 1 && selectedIndex > 0;
   const canMoveNext = claims.length > 1 && selectedIndex < claims.length - 1;
+  const statusClass = claim ? `timesheet-detail-${claim.status || 'Draft'}` : '';
 
   useEffect(() => {
     setNote(claim?.managerNote || '');
@@ -4029,7 +4062,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
   }
 
   return (
-    <div className="card">
+    <div className={`card timesheet-detail-card ${statusClass}`}>
       <div className="card-content space-y-sm">
         <div className="flex justify-between items-center" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
@@ -4055,6 +4088,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
             <thead>
               <tr>
                 <th>Day</th>
+                <th>Date</th>
                 <th>Project / Job</th>
                 <th>Project / Workshop</th>
                 <th>Travel</th>
@@ -4064,11 +4098,12 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
               </tr>
             </thead>
             <tbody>
-              {weekDays.map(day => {
+              {weekDays.map((day, index) => {
                 const row = claim.timesheet?.[day] || {};
                 return (
                   <tr key={day}>
                     <td><b>{day}</b></td>
+                    <td>{getDateForWeekDay(claim.week, index)}</td>
                     <td>{row.projectName || '—'}</td>
                     <td>{Number(row.projectHours || 0).toFixed(2)}</td>
                     <td>{Number(row.travelHours || 0).toFixed(2)}</td>
@@ -4082,16 +4117,17 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
           </table>
         </div>
 
-        <div className="space-y-sm" style={{ background: '#f8fafc', padding: 16, borderRadius: 20 }}>
+        <div className="space-y-sm" style={{ background: 'rgba(248,250,252,.82)', padding: 16, borderRadius: 20 }}>
           <label className="label">Manager Note</label>
           <textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} />
-          <button className="btn" type="button" onClick={() => updateClaim(claim.id, { status: 'Approved', managerNote: note })}>
-            <CheckCircle2 size={16} /> Approve
-          </button>
-          {' '}
-          <button className="btn danger" type="button" onClick={() => updateClaim(claim.id, { status: 'Rejected', managerNote: note })}>
-            <XCircle size={16} /> Reject
-          </button>
+          <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button className="btn" type="button" onClick={() => updateClaim(claim.id, { status: 'Approved', managerNote: note })}>
+              <CheckCircle2 size={16} /> Approve
+            </button>
+            <button className="btn danger" type="button" onClick={() => updateClaim(claim.id, { status: 'Rejected', managerNote: note })}>
+              <XCircle size={16} /> Reject
+            </button>
+          </div>
         </div>
       </div>
     </div>

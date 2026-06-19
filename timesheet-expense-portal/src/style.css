@@ -70,6 +70,11 @@ th { color: #64748b; font-weight: 700; }
 .request-stepper { display: grid; grid-template-columns: 42px minmax(64px, auto) 42px; align-items: center; gap: 8px; }
 .request-stepper .btn { min-width: 42px; padding: 8px 0; }
 .request-stepper-count { min-width: 64px; text-align: center; font-weight: 800; color: #475569; }
+.al-calendar-grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); gap: 6px; }
+.al-week-number { min-height: 92px; border-radius: 14px; background: #f8fafc; color: #475569; font-weight: 900; display: flex; align-items: center; justify-content: center; border: 1px solid #e2e8f0; }
+.timesheet-detail-card.timesheet-detail-Submitted { background: #fffbeb; border-color: #facc15; }
+.timesheet-detail-card.timesheet-detail-Approved { background: #f0fdf4; border-color: #86efac; }
+.timesheet-detail-card.timesheet-detail-Rejected { background: #fff1f2; border-color: #fda4af; }
 .receipt-thumb { max-height: 380px; width: 100%; object-fit: contain; border-radius: 18px; }
 .expense-row { grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1.2fr 1.6fr 120px auto; align-items: center; }
 .receipt-proof-cell { min-height: 42px; display: flex; align-items: center; }
