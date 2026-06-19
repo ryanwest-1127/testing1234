@@ -9,6 +9,7 @@ button, input, textarea, select { font: inherit; }
 .card-content { padding: 20px; }
 .grid { display: grid; gap: 16px; }
 .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid-2-1 { grid-template-columns: 2fr 1fr; }
 .flex { display: flex; }
@@ -79,6 +80,10 @@ th { color: #64748b; font-weight: 700; }
 .timesheet-detail-card.timesheet-detail-Submitted { background: #fffbeb; border-color: #facc15; }
 .timesheet-detail-card.timesheet-detail-Approved { background: #f0fdf4; border-color: #86efac; }
 .timesheet-detail-card.timesheet-detail-Rejected { background: #fff1f2; border-color: #fda4af; }
+.expense-detail-card.expense-detail-Submitted { background: #fffbeb; border-color: #facc15; }
+.expense-detail-card.expense-detail-Approved, .expense-detail-card.expense-detail-Paid { background: #f0fdf4; border-color: #86efac; }
+.expense-detail-card.expense-detail-Rejected { background: #fff1f2; border-color: #fda4af; }
+.expense-summary-strip { align-items: stretch; }
 .receipt-thumb { max-height: 380px; width: 100%; object-fit: contain; border-radius: 18px; }
 .expense-row { grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1.2fr 1.6fr 120px auto; align-items: center; }
 .receipt-proof-cell { min-height: 42px; display: flex; align-items: center; }
@@ -88,4 +93,4 @@ th { color: #64748b; font-weight: 700; }
 .receipt-proof:hover .receipt-proof-popover, .receipt-proof:focus-within .receipt-proof-popover { display: block; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.65); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
 .modal { background: white; width: min(900px, 96vw); max-height: 90vh; overflow: auto; border-radius: 28px; padding: 24px; }
-@media (max-width: 900px) { .grid-4, .grid-3, .grid-2, .grid-2-1, .expense-row { grid-template-columns: 1fr; } .tabs { grid-template-columns: 1fr 1fr; } .container { padding: 16px; } .wide { overflow-x: auto; } }
+@media (max-width: 900px) { .grid-5, .grid-4, .grid-3, .grid-2, .grid-2-1, .expense-row { grid-template-columns: 1fr; } .tabs { grid-template-columns: 1fr 1fr; } .container { padding: 16px; } .wide { overflow-x: auto; } }

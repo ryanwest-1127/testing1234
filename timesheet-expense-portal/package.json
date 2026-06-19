@@ -6,12 +6,12 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "framer-motion": "latest",
+    "jszip": "^3.10.1",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "framer-motion": "latest",
-    "lucide-react": "latest",
-    "recharts": "latest"
-  },
-  "devDependencies": {}
+    "recharts": "latest",
+    "vite": "latest"
+  }
 }

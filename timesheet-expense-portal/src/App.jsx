@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import JSZip from 'jszip';
 import {
   Tooltip, ResponsiveContainer, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Legend
 } from 'recharts';
@@ -405,16 +406,26 @@ function receiptDownloadItemsFromClaims(claims) {
     const categoryPart = sanitizeFilenamePart(expense.category || 'Expense');
     const projectPart = sanitizeFilenamePart(expense.projectName || expense.description || claim.employeeName || 'PJ');
     const originalExtension = String(expense.receiptName || '').match(/\.[a-z0-9]+$/i)?.[0] || '';
+    const employeeFolder = sanitizeFilenamePart(`${claim.employeeName || claim.employeeId || 'Employee'}_${claim.employeeId || ''}`);
 
     return {
       href: expense.receiptPreview,
+      folder: employeeFolder,
       filename: `${datePart}_${categoryPart}_${projectPart}_${String(index + 1).padStart(3, '0')}${originalExtension}`
     };
   });
 }
 
-function downloadReceiptItems(items) {
-  (items || []).forEach((item, index) => {
+function downloadReceiptItems(items, options = {}) {
+  const { asZip = false, useFolders = false, zipName = 'receipt-proofs.zip' } = options;
+  const safeItems = items || [];
+
+  if (asZip || useFolders) {
+    downloadReceiptZip(safeItems, { zipName, useFolders });
+    return;
+  }
+
+  safeItems.forEach((item, index) => {
     window.setTimeout(() => {
       const link = document.createElement('a');
       link.href = item.href;
@@ -424,6 +435,28 @@ function downloadReceiptItems(items) {
       link.remove();
     }, index * 150);
   });
+}
+
+async function downloadReceiptZip(items, options = {}) {
+  const { zipName = 'receipt-proofs.zip', useFolders = false } = options;
+  const zip = new JSZip();
+
+  await Promise.all((items || []).map(async (item) => {
+    const response = await fetch(item.href);
+    const data = await response.arrayBuffer();
+    const folder = useFolders && item.folder ? `${sanitizeFilenamePart(item.folder)}/` : '';
+    zip.file(`${folder}${sanitizeFilenamePart(item.filename)}`, data);
+  }));
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = sanitizeFilenamePart(zipName).endsWith('.zip') ? sanitizeFilenamePart(zipName) : `${sanitizeFilenamePart(zipName)}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function expensesMissingReceipts(expenses) {
@@ -2052,14 +2085,6 @@ function Dashboard({
                 <h2>Expense Overall Summary</h2>
                 <p className="small muted">Company expense by category, built from all employee expense items.</p>
               </div>
-              <button
-                className="btn secondary"
-                type="button"
-                disabled={companyReceiptItems.length === 0}
-                onClick={() => downloadReceiptItems(companyReceiptItems)}
-              >
-                Download All Receipts ({companyReceiptItems.length})
-              </button>
             </div>
 
             <div className="grid grid-4" style={{ marginTop: 14 }}>
@@ -3937,14 +3962,6 @@ function ManagerAdminCategory({
                     <option key={month} value={month}>{monthLabel(month)}</option>
                   ))}
                 </select>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  disabled={receiptItems.length === 0}
-                  onClick={() => downloadReceiptItems(receiptItems)}
-                >
-                  Download All Receipt Proofs ({receiptItems.length})
-                </button>
               </div>
             </div>
 
@@ -4021,7 +4038,7 @@ function ManagerAdminCategory({
                     className="btn secondary"
                     type="button"
                     disabled={receiptItems.length === 0}
-                    onClick={() => downloadReceiptItems(receiptItems)}
+                    onClick={() => downloadReceiptItems(receiptItems, { useFolders: true, zipName: 'employee-receipt-proofs.zip' })}
                   >
                     Download All Receipt Proofs ({receiptItems.length})
                   </button>
@@ -4386,6 +4403,8 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
             : Number(expense.amount || 0);
         const approvedExpenseAmount = expenseItems.reduce((sum, expense) => sum + expenseDecisionAmount(expense), 0);
         const allExpenseItemsApproved = expenseItems.length > 0 && expenseItems.every(expense => expense.approvalStatus !== 'rejected');
+        const claimReceiptItems = receiptDownloadItemsFromClaims([c]);
+        const claimReceiptZipName = `${sanitizeFilenamePart(c.employeeName || 'Employee')}_${sanitizeFilenamePart(c.periodLabel || getClaimExpenseMonth(c) || c.id)}_receipt-proofs.zip`;
         const updateExpenseItems = (mapper) => {
           const nextExpenses = expenseItems.map(mapper);
           const nextApprovedAmount = nextExpenses.reduce((sum, expense) => {
@@ -4404,7 +4423,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
         };
 
         return (
-          <div className="card" key={c.id}>
+          <div className={`card ${manager && isExpense ? `expense-detail-card expense-detail-${c.status || 'Draft'}` : ''}`} key={c.id}>
             <div className="card-content">
               <div className="flex justify-between gap" style={{ flexWrap: 'wrap' }}>
                 <div>
@@ -4428,11 +4447,10 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
 
               {isExpense ? (
                 <>
-                  <div className="grid grid-4">
+                  <div className="grid grid-5 expense-summary-strip">
                     <Mini label="Expense Total" value={money(c.totals?.totalExpense)} />
                     <Mini label="VAT Total" value={money(c.totals?.totalVAT)} />
                     <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
-                    <Mini label="Items" value={String(c.expenses?.length || 0)} />
                     <Mini label="Status" value={c.status} />
                     <Mini label="Company Approved Amount" value={money(c.approvedAmount ?? approvedExpenseAmount)} />
                   </div>
@@ -4574,39 +4592,36 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                   <label className="label">Manager Note</label>
                   <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />
 
-                  <button
-                    className="btn"
-                    onClick={() => updateClaim(c.id, {
-                      status: 'Approved',
-                      approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
-                    })}
-                  >
-                    <CheckCircle2 size={16} /> Approve
-                  </button>
-                  {' '}
-                  <button
-                    className="btn danger"
-                    onClick={() => updateClaim(c.id, {
-                      status: 'Rejected',
-                      approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
-                    })}
-                  >
-                    <XCircle size={16} /> Reject
-                  </button>
-                  {isExpense && (
-                    <>
-                      {' '}
+                  <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                    {isExpense && (
                       <button
                         className="btn secondary"
-                        onClick={() => updateClaim(c.id, {
-                          status: 'Paid',
-                          approvedAmount: approvedExpenseAmount
-                        })}
+                        type="button"
+                        disabled={claimReceiptItems.length === 0}
+                        onClick={() => downloadReceiptItems(claimReceiptItems, { asZip: true, zipName: claimReceiptZipName })}
                       >
-                        Mark as Paid
+                        Download This Application Proofs ({claimReceiptItems.length})
                       </button>
-                    </>
-                  )}
+                    )}
+                    <button
+                      className="btn"
+                      onClick={() => updateClaim(c.id, {
+                        status: 'Approved',
+                        approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
+                      })}
+                    >
+                      <CheckCircle2 size={16} /> Approve
+                    </button>
+                    <button
+                      className="btn danger"
+                      onClick={() => updateClaim(c.id, {
+                        status: 'Rejected',
+                        approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
+                      })}
+                    >
+                      <XCircle size={16} /> Reject
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
