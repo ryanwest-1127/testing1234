@@ -134,6 +134,7 @@ function defaultTimesheet() {
         travelHours: '',
         holidayType: 'none',
         takeBackTimeInLieu: '',
+        sicknessType: 'none',
         sickness: false,
       }
     ])
@@ -214,6 +215,8 @@ function calculateHolidayHours(row, standardHours) {
 function calculateSicknessHours(row, standardHours) {
   const dailyHours = Number(standardHours || 7.5);
 
+  if (row.sicknessType === 'full') return dailyHours;
+  if (row.sicknessType === 'half') return dailyHours / 2;
   if (row.sickness === true) return dailyHours;
 
   // Backwards compatibility for older saved demo data.
@@ -225,7 +228,11 @@ function calculateTakeBackTimeInLieuHours(row) {
 }
 
 function isLeaveDay(row) {
-  return row.holidayType === 'half' || row.holidayType === 'full' || row.sickness === true;
+  return row.holidayType === 'half' ||
+    row.holidayType === 'full' ||
+    row.sicknessType === 'half' ||
+    row.sicknessType === 'full' ||
+    row.sickness === true;
 }
 
 function calculateTotals(timesheet, expenses, til, standardHours) {
@@ -307,7 +314,8 @@ function approvedSicknessItemsFromClaims(claims) {
     .filter(claim => claimTypeOf(claim) === 'timesheet' && claim.status === 'Approved')
     .flatMap(claim => weekDays.flatMap((day, index) => {
       const row = claim.timesheet?.[day] || {};
-      if (!row.sickness) return [];
+      const sicknessHours = calculateSicknessHours(row, claim.standardHours || 7.5);
+      if (!sicknessHours) return [];
 
       const weekDate = getWeekDates(claim.week || '')[index];
       if (!weekDate?.date || !weekDate.inYear) return [];
@@ -320,7 +328,7 @@ function approvedSicknessItemsFromClaims(claims) {
         startDate: date,
         endDate: date,
         status: 'Sickness',
-        duration: 'full',
+        duration: sicknessHours < Number(claim.standardHours || 7.5) ? 'half' : 'full',
         calendarType: 'sickness'
       }];
     }));
@@ -463,6 +471,7 @@ function sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek) {
         travelHours: '',
         holidayType: 'none',
         takeBackTimeInLieu: '',
+        sicknessType: 'none',
         sickness: false
       };
     }
@@ -2818,7 +2827,8 @@ function TimesheetForm(p) {
                   const isLockedOutsideYear = dateInfo && dateInfo.inYear === false;
                   const dailyHours = Number(p.standardHours || 7.5);
                   const holidayType = row.holidayType || 'none';
-                  const sicknessSelected = row.sickness === true;
+                  const sicknessType = row.sicknessType || (row.sickness === true ? 'full' : 'none');
+                  const sicknessSelected = sicknessType === 'half' || sicknessType === 'full';
                   const takeBackHours = Number(row.takeBackTimeInLieu || 0);
                   const leaveSelected = holidayType === 'half' || holidayType === 'full' || sicknessSelected;
 
@@ -2832,7 +2842,10 @@ function TimesheetForm(p) {
                     holidayType === 'half' ? dailyHours / 2 :
                     0;
 
-                  const sicknessHours = isLockedOutsideYear ? 0 : (sicknessSelected ? dailyHours : 0);
+                  const sicknessHours = isLockedOutsideYear ? 0 :
+                    sicknessType === 'full' ? dailyHours :
+                    sicknessType === 'half' ? dailyHours / 2 :
+                    0;
                   const autoTimeInLieu = leaveSelected || isLockedOutsideYear ? 0 : Math.max(0, workedHours - dailyHours);
                   const total = isLockedOutsideYear ? 0 : (leaveSelected ? holidayHours + sicknessHours : workedHours + takeBackHours);
 
@@ -2846,16 +2859,18 @@ function TimesheetForm(p) {
                     if (isLockedOutsideYear) return;
                     const nextType = holidayType === type ? 'none' : type;
                     p.updateTimesheet(day, 'holidayType', nextType);
+                    p.updateTimesheet(day, 'sicknessType', 'none');
                     p.updateTimesheet(day, 'sickness', false);
                     if (nextType !== 'none') clearWorkingInputs();
                   };
 
-                  const setSickness = () => {
+                  const setSickness = (type) => {
                     if (isLockedOutsideYear) return;
-                    const nextValue = !sicknessSelected;
-                    p.updateTimesheet(day, 'sickness', nextValue);
+                    const nextType = sicknessType === type ? 'none' : type;
+                    p.updateTimesheet(day, 'sicknessType', nextType);
+                    p.updateTimesheet(day, 'sickness', nextType === 'full');
                     p.updateTimesheet(day, 'holidayType', 'none');
-                    if (nextValue) clearWorkingInputs();
+                    if (nextType !== 'none') clearWorkingInputs();
                   };
 
                   return (
@@ -2936,15 +2951,26 @@ function TimesheetForm(p) {
                       </td>
 
                       <td>
-                        <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <input
-                            type="checkbox"
-                            checked={sicknessSelected}
-                            disabled={isLockedOutsideYear}
-                            onChange={setSickness}
-                          />
-                          Sick ({dailyHours.toFixed(2)}h)
-                        </label>
+                        <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+                          <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="checkbox"
+                              checked={sicknessType === 'half'}
+                              disabled={isLockedOutsideYear}
+                              onChange={() => setSickness('half')}
+                            />
+                            Half sick ({(dailyHours / 2).toFixed(2)}h)
+                          </label>
+                          <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="checkbox"
+                              checked={sicknessType === 'full'}
+                              disabled={isLockedOutsideYear}
+                              onChange={() => setSickness('full')}
+                            />
+                            Full sick ({dailyHours.toFixed(2)}h)
+                          </label>
+                        </div>
                       </td>
 
                       <td><b>{total.toFixed(2)}</b></td>
@@ -3480,6 +3506,11 @@ function ManagerAnnualLeaveAdmin({
 }
 
 function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveRequestsForDate, readOnly = false, alForm = {}, selectAnnualLeaveDate }) {
+  const changeMonth = (delta) => {
+    const [year, month] = alMonth.split('-').map(Number);
+    const next = new Date(year, month - 1 + delta, 1);
+    setAlMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
+  };
   const calendarStart = alDays[0] ? new Date(alDays[0]) : new Date();
   calendarStart.setDate(calendarStart.getDate() - alBlanks.length);
   const calendarCells = [
@@ -3495,8 +3526,12 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
     <div className="card">
       <div className="card-content">
         <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
-          <h2 style={{ margin: 0 }}>{monthLabel(alMonth)}</h2>
-          <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
+          <div className="month-stepper">
+            <button className="btn secondary" type="button" onClick={() => changeMonth(-1)}>{'<'}</button>
+            <h2>{monthLabel(alMonth)}</h2>
+            <button className="btn secondary" type="button" onClick={() => changeMonth(1)}>{'>'}</button>
+          </div>
+          <input className="input month-picker-input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '56px repeat(7, 1fr)', gap: 6, marginBottom: 8, textAlign: 'center' }}>
@@ -3803,7 +3838,7 @@ function ManagerAdminCategory({
     .filter(matchesSearch);
   const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeClaims = selectedEmployeeId
-    ? visibleClaims
+    ? (isExpenseAdmin ? visibleClaims : claims.filter(matchesSearch))
         .filter(claim => claim.employeeId === selectedEmployeeId)
         .sort((a, b) => isExpenseAdmin
           ? String(getClaimExpenseMonth(b)).localeCompare(String(getClaimExpenseMonth(a)))
@@ -3821,6 +3856,8 @@ function ManagerAdminCategory({
       const rejected = employeeClaims.filter(claim => claim.status === 'Rejected').length;
       const totalAmount = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
       const totalHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalWorkingHours || 0), 0);
+      const projectHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.projectHours || 0), 0);
+      const travelHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.travelHours || 0), 0);
       const tilRemaining = employeeClaims.reduce(
         (sum, claim) => sum + Number(claim.totals?.timeInLieu || 0) - Number(claim.totals?.takeBackTimeInLieu || 0),
         0
@@ -3835,6 +3872,8 @@ function ManagerAdminCategory({
         rejected,
         totalAmount,
         totalHours,
+        projectHours,
+        travelHours,
         tilRemaining,
         latestWeek: latestClaim ? (latestClaim.weekLabel || latestClaim.week) : '—'
       };
@@ -3851,7 +3890,6 @@ function ManagerAdminCategory({
         setTab={setTab}
         currentTab={currentTab}
         counts={approvalCounts}
-        hideBeforeCurrent={currentTab === 'timesheet'}
       />
 
       {!selectedEmployeeId ? (
@@ -3910,6 +3948,8 @@ function ManagerAdminCategory({
                     <tr>
                       <th>Employee</th>
                       <th>Pending</th>
+                      <th>Project / Workshop</th>
+                      <th>Travel</th>
                       <th>Time in Lieu Remaining</th>
                       <th>Week</th>
                       <th>Full Data</th>
@@ -3940,6 +3980,8 @@ function ManagerAdminCategory({
                             {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                             {employee.pending}
                           </td>
+                          <td>{Number(employee.projectHours || 0).toFixed(2)} hrs</td>
+                          <td>{Number(employee.travelHours || 0).toFixed(2)} hrs</td>
                           <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
                           <td>{employee.latestWeek}</td>
                           <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
@@ -4005,6 +4047,8 @@ function ManagerAdminCategory({
                         <tr>
                           <th>Employee</th>
                           <th>Pending</th>
+                          <th>Project / Workshop</th>
+                          <th>Travel</th>
                           <th>Time in Lieu Remaining</th>
                           <th>Week</th>
                           <th>Full Data</th>
@@ -4018,6 +4062,8 @@ function ManagerAdminCategory({
                               {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                               {employee.pending}
                             </td>
+                            <td>{Number(employee.projectHours || 0).toFixed(2)} hrs</td>
+                            <td>{Number(employee.travelHours || 0).toFixed(2)} hrs</td>
                             <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
                             <td>{employee.latestWeek}</td>
                             <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
@@ -4109,7 +4155,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
                     <td>{Number(row.travelHours || 0).toFixed(2)}</td>
                     <td>{Number(row.takeBackTimeInLieu || 0).toFixed(2)}</td>
                     <td>{row.holidayType === 'full' ? 'Full day' : row.holidayType === 'half' ? 'Half day' : '—'}</td>
-                    <td>{row.sickness ? 'Sick' : '—'}</td>
+                    <td>{row.sicknessType === 'half' ? 'Half sick' : row.sicknessType === 'full' || row.sickness ? 'Full sick' : '—'}</td>
                   </tr>
                 );
               })}
@@ -4251,7 +4297,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                               <td>{Number(row.travelHours || 0).toFixed(2)}</td>
                               <td>{Number(row.takeBackTimeInLieu || 0).toFixed(2)}</td>
                               <td>{row.holidayType === 'full' ? 'Full day' : row.holidayType === 'half' ? 'Half day' : '—'}</td>
-                              <td>{row.sickness ? 'Sick' : '—'}</td>
+                              <td>{row.sicknessType === 'half' ? 'Half sick' : row.sicknessType === 'full' || row.sickness ? 'Full sick' : '—'}</td>
                             </tr>
                           );
                         })}
