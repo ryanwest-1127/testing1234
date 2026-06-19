@@ -784,28 +784,6 @@ export default function App() {
     totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
   });
 
-  const buildExpenseClaimsByDateMonth = status => {
-    const groups = expenses.reduce((acc, expense) => {
-      const month = expense.date?.slice(0, 7) || selectedExpenseMonth || currentMonthValue();
-      acc[month] = [...(acc[month] || []), expense];
-      return acc;
-    }, {});
-
-    return Object.entries(groups).map(([month, monthExpenses]) => ({
-      ...commonClaimFields(status),
-      type: 'expense',
-      week: '',
-      weekLabel: '',
-      expenseMonth: month,
-      periodLabel: monthLabel(month),
-      expenses: monthExpenses,
-      totals: {
-        totalExpense: monthExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0),
-        totalVAT: monthExpenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0)
-      }
-    }));
-  };
-
   const saveDraft = () => {
     upsertClaim(buildTimesheetClaim('Draft'));
   };
@@ -826,7 +804,7 @@ export default function App() {
       return;
     }
 
-    buildExpenseClaimsByDateMonth('Submitted').forEach(claim => upsertClaim(claim));
+    upsertClaim(buildExpenseClaim('Submitted'));
     setExpenses([makeExpense()]);
     setTab('dashboard');
   };
@@ -891,6 +869,7 @@ export default function App() {
       const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
       const vatTotal = expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
       const selectedEmployee = employees.find(e => e.id === employeeInfo.employeeId);
+      const inferredExpenseMonth = expenses.find(expense => expense.date)?.date?.slice(0, 7) || getClaimExpenseMonth(editingOriginalClaim) || currentMonthValue();
 
       updatedClaim = {
         ...editingOriginalClaim,
@@ -900,8 +879,8 @@ export default function App() {
         department: selectedEmployee?.department || editingOriginalClaim.department || 'Production',
         week: '',
         weekLabel: '',
-        expenseMonth: selectedExpenseMonth || currentMonthValue(),
-        periodLabel: monthLabel(selectedExpenseMonth || currentMonthValue()),
+        expenseMonth: inferredExpenseMonth,
+        periodLabel: monthLabel(inferredExpenseMonth),
         expenses,
         totals: { totalExpense: expenseTotal, totalVAT: vatTotal },
         notes: employeeInfo.notes,
@@ -3836,29 +3815,34 @@ function ManagerAdminCategory({
   const isExpenseAdmin = claims.some(claim => claimTypeOf(claim) === 'expense');
   const pendingClaims = claims.filter(claim => claim.status === 'Submitted');
   const expenseMonthOptions = isExpenseAdmin
-    ? Array.from(new Set(claims.map(claim => getClaimExpenseMonth(claim)).filter(Boolean))).sort().reverse()
+    ? Array.from(new Set(claims
+        .filter(claim => ['Approved', 'Paid'].includes(claim.status))
+        .flatMap(claim => (claim.expenses || []).map(expense => expense.date?.slice(0, 7) || getClaimExpenseMonth(claim)).filter(Boolean))
+      )).sort().reverse()
     : [];
-  const approvedExpenseClaimsForSummary = isExpenseAdmin
-    ? claims.filter(claim => ['Approved', 'Paid'].includes(claim.status))
-        .filter(claim => expenseSummaryMonth === 'All' || getClaimExpenseMonth(claim) === expenseSummaryMonth)
+  const approvedExpenseItemsForSummary = isExpenseAdmin
+    ? claims
+        .filter(claim => ['Approved', 'Paid'].includes(claim.status))
+        .flatMap(claim => (claim.expenses || []).map(expense => ({
+          claim,
+          expense,
+          month: expense.date?.slice(0, 7) || getClaimExpenseMonth(claim)
+        })))
+        .filter(item => expenseSummaryMonth === 'All' || item.month === expenseSummaryMonth)
     : [];
-  const expenseGross = isExpenseAdmin ? approvedExpenseClaimsForSummary.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0) : 0;
-  const expenseApprovedPaid = isExpenseAdmin
-    ? approvedExpenseClaimsForSummary.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0)
-    : 0;
-  const expenseVat = isExpenseAdmin ? approvedExpenseClaimsForSummary.reduce((sum, claim) => sum + Number(claim.totals?.totalVAT || 0), 0) : 0;
+  const expenseGross = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => sum + Number(item.expense.amount || 0), 0) : 0;
+  const expenseApprovedPaid = expenseGross;
+  const expenseVat = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => sum + Number(item.expense.vat || 0), 0) : 0;
   const expenseByCategory = isExpenseAdmin
-    ? Object.values(approvedExpenseClaimsForSummary.reduce((groups, claim) => {
-        (claim.expenses || []).forEach(expense => {
-          const category = expense.category || 'Other';
-          const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
-          groups[category] = {
-            ...existing,
-            value: existing.value + Number(expense.amount || 0),
-            vat: existing.vat + Number(expense.vat || 0),
-            count: existing.count + 1
-          };
-        });
+    ? Object.values(approvedExpenseItemsForSummary.reduce((groups, item) => {
+        const category = item.expense.category || 'Other';
+        const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
+        groups[category] = {
+          ...existing,
+          value: existing.value + Number(item.expense.amount || 0),
+          vat: existing.vat + Number(item.expense.vat || 0),
+          count: existing.count + 1
+        };
         return groups;
       }, {})).sort((a, b) => b.value - a.value)
     : [];
