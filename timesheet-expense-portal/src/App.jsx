@@ -302,6 +302,30 @@ function formatISODateLocal(date) {
   return `${y}-${m}-${d}`;
 }
 
+function approvedSicknessItemsFromClaims(claims) {
+  return (claims || [])
+    .filter(claim => claimTypeOf(claim) === 'timesheet' && claim.status === 'Approved')
+    .flatMap(claim => weekDays.flatMap((day, index) => {
+      const row = claim.timesheet?.[day] || {};
+      if (!row.sickness) return [];
+
+      const weekDate = getWeekDates(claim.week || '')[index];
+      if (!weekDate?.date || !weekDate.inYear) return [];
+
+      const date = formatISODateLocal(weekDate.date);
+      return [{
+        id: `${claim.id}-${day}-sickness`,
+        employeeId: claim.employeeId,
+        employeeName: claim.employeeName,
+        startDate: date,
+        endDate: date,
+        status: 'Sickness',
+        duration: 'full',
+        calendarType: 'sickness'
+      }];
+    }));
+}
+
 
 function claimTypeOf(claim) {
   return claim.type || (claim.expenses ? 'expense' : 'timesheet');
@@ -1028,10 +1052,12 @@ export default function App() {
   const alFirstDay = alMonthStart.getDay() || 7;
   const alBlanks = Array.from({ length: alFirstDay - 1 });
   const alDays = Array.from({ length: alMonthEnd.getDate() }, (_, i) => new Date(alYear, alMonthNumber - 1, i + 1));
+  const approvedSicknessCalendarItems = approvedSicknessItemsFromClaims(accountClaims);
 
   const leaveRequestsForDate = (date) => {
     const key = formatISODateLocal(date);
-    return visibleLeaveRequests.filter(r => getDatesBetween(r.startDate, r.endDate).some(d => formatISODateLocal(d) === key));
+    return [...visibleLeaveRequests, ...approvedSicknessCalendarItems]
+      .filter(r => getDatesBetween(r.startDate, r.endDate).some(d => formatISODateLocal(d) === key));
   };
 
   const findPreviousAnnualLeave = () => {
@@ -1374,17 +1400,6 @@ export default function App() {
                       : 'Click a date to apply AL. Manager approval deducts from Annual Leave Remaining.'}
                   </p>
                 </div>
-                <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-                  {activeUser.role === 'Manager' && managerDataMode === 'overall' && (
-                    <button className="btn secondary" type="button" onClick={() => setTab('dashboard')}>
-                      Back to Approval Dashboard
-                    </button>
-                  )}
-                  <button className="btn secondary" type="button" onClick={findPreviousAnnualLeave}>
-                    Find Previous AL
-                  </button>
-                  <input className="input" type="month" value={alMonth} onChange={e => setAlMonth(e.target.value)} style={{ maxWidth: 180 }} />
-                </div>
               </div>
             </div>
 
@@ -1395,54 +1410,15 @@ export default function App() {
             </div>
 
             <div className="grid grid-2-1">
-              <div className="card">
-                <div className="card-content">
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 8, textAlign: 'center' }}>
-                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <b key={d} className="small muted">{d}</b>)}
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
-                    {alBlanks.map((_, i) => <div key={`blank-${i}`} />)}
-                    {alDays.map(day => {
-                      const key = formatISODateLocal(day);
-                      const items = leaveRequestsForDate(day);
-                      const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-                      const isSelected = alForm.startDate && alForm.endDate && key >= alForm.startDate && key <= alForm.endDate;
-
-                      return (
-                        <button
-                          type="button"
-                          key={key}
-                          onClick={() => {
-                            if (!(activeUser.role === 'Manager' && managerDataMode === 'overall')) {
-                              selectAnnualLeaveDate(day);
-                            }
-                          }}
-                          style={{
-                            minHeight: 92,
-                            textAlign: 'left',
-                            padding: 8,
-                            borderRadius: 14,
-                            border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
-                            background: isSelected ? '#dbeafe' : isWeekend ? '#f1f5f9' : '#ffffff',
-                            cursor: activeUser.role === 'Manager' && managerDataMode === 'overall' ? 'default' : 'pointer'
-                          }}
-                        >
-                          <b>{day.getDate()}</b>
-                          {isWeekend && <div className="xsmall muted">Weekend</div>}
-                          <div className="space-y-sm" style={{ marginTop: 6 }}>
-                            {items.slice(0, 2).map(item => (
-                              <div key={item.id} className={`badge ${item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
-                                {item.employeeName} · {item.duration === 'half' ? '½ day' : 'AL'} · {item.status}
-                              </div>
-                            ))}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+              <AnnualLeaveCalendar
+                alMonth={alMonth}
+                setAlMonth={setAlMonth}
+                alBlanks={alBlanks}
+                alDays={alDays}
+                leaveRequestsForDate={leaveRequestsForDate}
+                alForm={alForm}
+                selectAnnualLeaveDate={selectAnnualLeaveDate}
+              />
 
               {!(activeUser.role === 'Manager' && managerDataMode === 'overall') && (
               <div className="card">
@@ -3427,7 +3403,6 @@ function ManagerAnnualLeaveAdmin({
                     <option key={employee.id} value={employee.id}>{employee.name}</option>
                   ))}
                 </select>
-                <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
                 <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
                 <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
             </div>
@@ -3441,6 +3416,8 @@ function ManagerAnnualLeaveAdmin({
 
           <div className="grid grid-2-1">
             <AnnualLeaveCalendar
+              alMonth={alMonth}
+              setAlMonth={setAlMonth}
               alBlanks={alBlanks}
               alDays={alDays}
               leaveRequestsForDate={(day) => leaveRequestsForDate(day).filter(request => request.employeeId === selectedEmployeeId)}
@@ -3499,10 +3476,15 @@ function ManagerAnnualLeaveAdmin({
   );
 }
 
-function AnnualLeaveCalendar({ alBlanks, alDays, leaveRequestsForDate, readOnly = false, alForm = {}, selectAnnualLeaveDate }) {
+function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveRequestsForDate, readOnly = false, alForm = {}, selectAnnualLeaveDate }) {
   return (
     <div className="card">
       <div className="card-content">
+        <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
+          <h2 style={{ margin: 0 }}>{monthLabel(alMonth)}</h2>
+          <input className="input" type="month" value={alMonth} onChange={event => setAlMonth(event.target.value)} style={{ maxWidth: 180 }} />
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 8, textAlign: 'center' }}>
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <b key={d} className="small muted">{d}</b>)}
         </div>
@@ -3540,8 +3522,8 @@ function AnnualLeaveCalendar({ alBlanks, alDays, leaveRequestsForDate, readOnly 
                 {isWeekend && <div className="xsmall muted">Weekend</div>}
                 <div className="space-y-sm" style={{ marginTop: 6 }}>
                   {items.slice(0, 2).map(item => (
-                    <div key={item.id} className={`badge al-status ${item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
-                      {item.employeeName} · {item.duration === 'half' ? 'Half day' : 'AL'} · {item.status}
+                    <div key={item.id} className={`badge al-status ${item.calendarType === 'sickness' ? 'Sickness' : item.status}`} style={{ display: 'block', whiteSpace: 'normal' }}>
+                      {item.employeeName} · {item.calendarType === 'sickness' ? 'Sickness' : item.duration === 'half' ? 'Half day' : 'AL'} · {item.status}
                     </div>
                   ))}
                 </div>
@@ -3769,6 +3751,7 @@ function ManagerAdminCategory({
   const [mode, setMode] = useState('approval');
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [selectedClaimId, setSelectedClaimId] = useState('');
   const receiptItems = receiptDownloadItemsFromClaims(claims);
   const isExpenseAdmin = claims.some(claim => claimTypeOf(claim) === 'expense');
   const pendingClaims = claims.filter(claim => claim.status === 'Submitted');
@@ -3793,8 +3776,15 @@ function ManagerAdminCategory({
     .filter(matchesSearch);
   const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeClaims = selectedEmployeeId
-    ? visibleClaims.filter(claim => claim.employeeId === selectedEmployeeId)
+    ? visibleClaims
+        .filter(claim => claim.employeeId === selectedEmployeeId)
+        .sort((a, b) => isExpenseAdmin
+          ? String(getClaimExpenseMonth(b)).localeCompare(String(getClaimExpenseMonth(a)))
+          : String(b.week || '').localeCompare(String(a.week || '')))
     : [];
+  const selectedEmployeeSelectedClaim = selectedEmployeeClaims.find(claim => claim.id === selectedClaimId) ||
+    selectedEmployeeClaims[0] ||
+    null;
   const employeeRows = employees
     .filter(employee => employee.role !== 'Manager')
     .map(employee => {
@@ -3804,6 +3794,11 @@ function ManagerAdminCategory({
       const rejected = employeeClaims.filter(claim => claim.status === 'Rejected').length;
       const totalAmount = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
       const totalHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalWorkingHours || 0), 0);
+      const tilRemaining = employeeClaims.reduce(
+        (sum, claim) => sum + Number(claim.totals?.timeInLieu || 0) - Number(claim.totals?.takeBackTimeInLieu || 0),
+        0
+      );
+      const latestClaim = [...employeeClaims].sort((a, b) => String(b.week || '').localeCompare(String(a.week || '')))[0];
 
       return {
         ...employee,
@@ -3812,10 +3807,16 @@ function ManagerAdminCategory({
         approved,
         rejected,
         totalAmount,
-        totalHours
+        totalHours,
+        tilRemaining,
+        latestWeek: latestClaim ? (latestClaim.weekLabel || latestClaim.week) : '—'
       };
     })
     .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
+
+  useEffect(() => {
+    setSelectedClaimId(selectedEmployeeClaims[0]?.id || '');
+  }, [selectedEmployeeId, mode, searchText, claims.length]);
 
   return (
     <div className="space-y">
@@ -3862,31 +3863,56 @@ function ManagerAdminCategory({
             <div className="wide" style={{ marginTop: 14 }}>
               <table>
                 <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Department</th>
-                    <th>Pending</th>
-                    <th>Approved/Paid</th>
-                    <th>Rejected</th>
-                    <th>{isExpenseAdmin ? 'Total Claims' : 'Total Hours'}</th>
-                    <th>Total Records</th>
-                    <th>Full Data</th>
-                  </tr>
+                  {isExpenseAdmin ? (
+                    <tr>
+                      <th>Employee</th>
+                      <th>Department</th>
+                      <th>Pending</th>
+                      <th>Approved/Paid</th>
+                      <th>Rejected</th>
+                      <th>Total Claims</th>
+                      <th>Total Records</th>
+                      <th>Full Data</th>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <th>Employee</th>
+                      <th>Pending</th>
+                      <th>Time in Lieu Remaining</th>
+                      <th>Week</th>
+                      <th>Full Data</th>
+                    </tr>
+                  )}
                 </thead>
                 <tbody>
                   {employeeRows.map(employee => (
                     <tr key={employee.id} className={employee.pending ? 'employee-row-pending' : ''}>
-                      <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
-                      <td>{employee.department}</td>
-                      <td>
-                        {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
-                        {employee.pending}
-                      </td>
-                      <td>{employee.approved}</td>
-                      <td>{employee.rejected}</td>
-                      <td>{isExpenseAdmin ? money(employee.totalAmount) : `${employee.totalHours.toFixed(2)} hrs`}</td>
-                      <td>{employee.total}</td>
-                      <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                      {isExpenseAdmin ? (
+                        <>
+                          <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                          <td>{employee.department}</td>
+                          <td>
+                            {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
+                            {employee.pending}
+                          </td>
+                          <td>{employee.approved}</td>
+                          <td>{employee.rejected}</td>
+                          <td>{money(employee.totalAmount)}</td>
+                          <td>{employee.total}</td>
+                          <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                        </>
+                      ) : (
+                        <>
+                          <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                          <td>
+                            {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
+                            {employee.pending}
+                          </td>
+                          <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
+                          <td>{employee.latestWeek}</td>
+                          <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -3920,14 +3946,154 @@ function ManagerAdminCategory({
             </div>
           </div>
 
-          <ClaimList
-            claims={selectedEmployeeClaims}
-            setReceipt={setReceipt}
-            manager
-            updateClaim={updateClaim}
-          />
+          {isExpenseAdmin ? (
+            <ClaimList
+              claims={selectedEmployeeClaims}
+              setReceipt={setReceipt}
+              manager
+              updateClaim={updateClaim}
+            />
+          ) : (
+            <>
+              <TimesheetApprovalDetail
+                claims={selectedEmployeeClaims}
+                claim={selectedEmployeeSelectedClaim}
+                selectedClaimId={selectedClaimId}
+                setSelectedClaimId={setSelectedClaimId}
+                updateClaim={updateClaim}
+              />
+
+              <div className="card">
+                <div className="card-content">
+                  <h2>Timesheet Employee Summary</h2>
+                  <p className="small muted">Pending staff stay at the top with a green light.</p>
+                  <div className="wide" style={{ marginTop: 14 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Pending</th>
+                          <th>Time in Lieu Remaining</th>
+                          <th>Week</th>
+                          <th>Full Data</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {employeeRows.map(employee => (
+                          <tr key={employee.id} className={employee.pending ? 'employee-row-pending' : ''}>
+                            <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                            <td>
+                              {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
+                              {employee.pending}
+                            </td>
+                            <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
+                            <td>{employee.latestWeek}</td>
+                            <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, updateClaim }) {
+  const [note, setNote] = useState('');
+  const selectedIndex = Math.max(0, claims.findIndex(item => item.id === selectedClaimId));
+  const canMovePrevious = claims.length > 1 && selectedIndex > 0;
+  const canMoveNext = claims.length > 1 && selectedIndex < claims.length - 1;
+
+  useEffect(() => {
+    setNote(claim?.managerNote || '');
+  }, [claim?.id]);
+
+  const moveClaim = (direction) => {
+    if (!claims.length) return;
+    const nextIndex = Math.min(Math.max(selectedIndex + direction, 0), claims.length - 1);
+    setSelectedClaimId(claims[nextIndex]?.id || '');
+  };
+
+  if (!claim) {
+    return (
+      <div className="card">
+        <div className="card-content muted">No timesheet records in this view for this employee.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <div className="card-content space-y-sm">
+        <div className="flex justify-between items-center" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h2>Timesheet Week Detail</h2>
+            <p className="small muted">{claim.employeeName} - {claim.weekLabel || claim.week}</p>
+          </div>
+          <div className="request-stepper">
+            <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveClaim(-1)}>{'<'}</button>
+            <span className="request-stepper-count">{claims.length ? `${selectedIndex + 1} / ${claims.length}` : '0 / 0'}</span>
+            <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveClaim(1)}>{'>'}</button>
+          </div>
+        </div>
+
+        <div className="grid grid-4">
+          <Mini label="Working Hours" value={`${claim.totals?.totalWorkingHours?.toFixed?.(2) || '0.00'} hrs`} />
+          <Mini label="Project / Workshop" value={`${claim.totals?.projectHours?.toFixed?.(2) || '0.00'} hrs`} />
+          <Mini label="Travel Hours" value={`${claim.totals?.travelHours?.toFixed?.(2) || '0.00'} hrs`} />
+          <Mini label="TIL Balance" value={`${claim.totals?.tilBalance?.toFixed?.(2) || '0.00'} hrs`} />
+        </div>
+
+        <div className="wide">
+          <table>
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Project / Job</th>
+                <th>Project / Workshop</th>
+                <th>Travel</th>
+                <th>Take back TIL</th>
+                <th>Holiday</th>
+                <th>Sickness</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weekDays.map(day => {
+                const row = claim.timesheet?.[day] || {};
+                return (
+                  <tr key={day}>
+                    <td><b>{day}</b></td>
+                    <td>{row.projectName || '—'}</td>
+                    <td>{Number(row.projectHours || 0).toFixed(2)}</td>
+                    <td>{Number(row.travelHours || 0).toFixed(2)}</td>
+                    <td>{Number(row.takeBackTimeInLieu || 0).toFixed(2)}</td>
+                    <td>{row.holidayType === 'full' ? 'Full day' : row.holidayType === 'half' ? 'Half day' : '—'}</td>
+                    <td>{row.sickness ? 'Sick' : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="space-y-sm" style={{ background: '#f8fafc', padding: 16, borderRadius: 20 }}>
+          <label className="label">Manager Note</label>
+          <textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} />
+          <button className="btn" type="button" onClick={() => updateClaim(claim.id, { status: 'Approved', managerNote: note })}>
+            <CheckCircle2 size={16} /> Approve
+          </button>
+          {' '}
+          <button className="btn danger" type="button" onClick={() => updateClaim(claim.id, { status: 'Rejected', managerNote: note })}>
+            <XCircle size={16} /> Reject
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4117,17 +4283,21 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                   >
                     <XCircle size={16} /> Reject
                   </button>
-                  {' '}
-                  <button
-                    className="btn secondary"
-                    onClick={() => updateClaim(c.id, {
-                      status: 'Paid',
-                      companyPaidFull: isExpense ? c.companyPaidFull !== false : c.companyPaidFull,
-                      approvedAmount: isExpense && c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : c.approvedAmount
-                    })}
-                  >
-                    Mark as Paid
-                  </button>
+                  {isExpense && (
+                    <>
+                      {' '}
+                      <button
+                        className="btn secondary"
+                        onClick={() => updateClaim(c.id, {
+                          status: 'Paid',
+                          companyPaidFull: c.companyPaidFull !== false,
+                          approvedAmount: c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : c.approvedAmount
+                        })}
+                      >
+                        Mark as Paid
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
