@@ -111,6 +111,20 @@ function weekLabel(week) {
   return `Week ${weekNumber}, ${year}`;
 }
 
+function currentBusinessWeekValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const week = Math.min(getWeeksInBusinessYear(year), Math.max(1, getBusinessWeekNumberFromDate(now, year)));
+  return makeWeekValue(year, week);
+}
+
+function nearestCurrentOrPastWeekClaim(claims) {
+  if (!claims.length) return null;
+  const currentWeek = currentBusinessWeekValue();
+  const sortedClaims = [...claims].sort((a, b) => String(a.week || '').localeCompare(String(b.week || '')));
+  return [...sortedClaims].reverse().find(claim => String(claim.week || '') <= currentWeek) || sortedClaims[0];
+}
+
 function currentMonthValue() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -3810,13 +3824,33 @@ function ManagerAdminCategory({
   approvalCounts,
   showReceiptDownload = false
 }) {
-  const [mode, setMode] = useState('approval');
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [selectedClaimId, setSelectedClaimId] = useState('');
   const receiptItems = receiptDownloadItemsFromClaims(claims);
   const isExpenseAdmin = claims.some(claim => claimTypeOf(claim) === 'expense');
   const pendingClaims = claims.filter(claim => claim.status === 'Submitted');
+  const expenseGross = isExpenseAdmin ? claims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0) : 0;
+  const expenseApprovedPaid = isExpenseAdmin
+    ? claims.filter(claim => ['Approved', 'Paid'].includes(claim.status)).reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0)
+    : 0;
+  const expenseVat = isExpenseAdmin ? claims.reduce((sum, claim) => sum + Number(claim.totals?.totalVAT || 0), 0) : 0;
+  const expenseByCategory = isExpenseAdmin
+    ? Object.values(claims.reduce((groups, claim) => {
+        (claim.expenses || []).forEach(expense => {
+          const category = expense.category || 'Other';
+          const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
+          groups[category] = {
+            ...existing,
+            value: existing.value + Number(expense.amount || 0),
+            vat: existing.vat + Number(expense.vat || 0),
+            count: existing.count + 1
+          };
+        });
+        return groups;
+      }, {})).sort((a, b) => b.value - a.value)
+    : [];
+  const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#0891b2', '#f97316', '#64748b'];
   const matchesSearch = (claim) => {
     const haystack = [
       claim.employeeName,
@@ -3833,9 +3867,7 @@ function ManagerAdminCategory({
 
     return haystack.includes(searchText.toLowerCase());
   };
-  const visibleClaims = claims
-    .filter(claim => mode === 'approval' ? claim.status === 'Submitted' : claim.status !== 'Submitted')
-    .filter(matchesSearch);
+  const visibleClaims = claims.filter(matchesSearch);
   const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeClaims = selectedEmployeeId
     ? (isExpenseAdmin ? visibleClaims : claims.filter(matchesSearch))
@@ -3845,7 +3877,7 @@ function ManagerAdminCategory({
           : String(a.week || '').localeCompare(String(b.week || '')))
     : [];
   const selectedEmployeeSelectedClaim = selectedEmployeeClaims.find(claim => claim.id === selectedClaimId) ||
-    selectedEmployeeClaims[0] ||
+    (isExpenseAdmin ? selectedEmployeeClaims[0] : nearestCurrentOrPastWeekClaim(selectedEmployeeClaims)) ||
     null;
   const employeeRows = employees
     .filter(employee => employee.role !== 'Manager')
@@ -3881,8 +3913,9 @@ function ManagerAdminCategory({
     .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
 
   useEffect(() => {
-    setSelectedClaimId(selectedEmployeeClaims[0]?.id || '');
-  }, [selectedEmployeeId, mode, searchText, claims.length]);
+    const defaultClaim = isExpenseAdmin ? selectedEmployeeClaims[0] : nearestCurrentOrPastWeekClaim(selectedEmployeeClaims);
+    setSelectedClaimId(defaultClaim?.id || '');
+  }, [selectedEmployeeId, searchText, claims.length, isExpenseAdmin]);
 
   return (
     <div className="space-y">
@@ -3891,6 +3924,83 @@ function ManagerAdminCategory({
         currentTab={currentTab}
         counts={approvalCounts}
       />
+
+      {isExpenseAdmin && !selectedEmployeeId && (
+        <div className="card">
+          <div className="card-content">
+            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <p className="small muted">Company Expense Overview</p>
+                <h2>Expense Overall Summary</h2>
+                <p className="small muted">Company expense by category, built from all employee expense items.</p>
+              </div>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={receiptItems.length === 0}
+                onClick={() => downloadReceiptItems(receiptItems)}
+              >
+                Download All Receipt Proofs ({receiptItems.length})
+              </button>
+            </div>
+
+            <div className="grid grid-4" style={{ marginTop: 14 }}>
+              <Mini label="Company Expense Total" value={money(Math.max(0, expenseGross - expenseApprovedPaid))} />
+              <Mini label="All Expense Claims" value={money(expenseGross)} />
+              <Mini label="Approved / Paid" value={money(expenseApprovedPaid)} />
+              <Mini label="Company VAT Total" value={money(expenseVat)} />
+            </div>
+
+            <div className="grid grid-2-1" style={{ marginTop: 18 }}>
+              <div>
+                {expenseByCategory.length === 0 ? (
+                  <div className="muted" style={{ padding: 24 }}>No expense category data yet.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie data={expenseByCategory} dataKey="value" nameKey="name" outerRadius={86} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                        {expenseByCategory.map((item, index) => (
+                          <Cell key={item.name} fill={expensePieColors[index % expensePieColors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => money(value)} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className="wide">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th>Items</th>
+                      <th>Total</th>
+                      <th>VAT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expenseByCategory.length === 0 ? (
+                      <tr><td colSpan="4" className="muted">No expense category data yet.</td></tr>
+                    ) : expenseByCategory.map((category, index) => (
+                      <tr key={category.name}>
+                        <td>
+                          <span aria-hidden="true" style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 999, background: expensePieColors[index % expensePieColors.length], marginRight: 8 }} />
+                          <b>{category.name}</b>
+                        </td>
+                        <td>{category.count}</td>
+                        <td>{money(category.value)}</td>
+                        <td>{money(category.vat)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!selectedEmployeeId ? (
         <div className="card">
@@ -3902,10 +4012,6 @@ function ManagerAdminCategory({
                 <p className="small muted">{pendingClaims.length} {isExpenseAdmin ? 'expense' : 'timesheet'} application(s) waiting. {note}</p>
               </div>
               <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-                <div className="manager-mode-switch" style={{ background: '#f1f5f9', borderColor: '#e2e8f0' }}>
-                  <button type="button" className={mode === 'approval' ? 'active' : ''} onClick={() => setMode('approval')}>Approval</button>
-                  <button type="button" className={mode === 'history' ? 'active' : ''} onClick={() => setMode('history')}>History</button>
-                </div>
                 {showReceiptDownload && (
                   <button
                     className="btn secondary"
@@ -3996,14 +4102,12 @@ function ManagerAdminCategory({
         </div>
       ) : (
         <>
-          <div className="card">
-            <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <p className="small muted">Employee Full Data</p>
-                <h2>{selectedEmployee?.name || 'Employee'} {isExpenseAdmin ? 'Expense' : 'Timesheet'} Applications</h2>
-                <p className="small muted">Showing {mode === 'approval' ? 'pending approval' : 'history'} records that match the current search.</p>
-              </div>
-              <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <p className="small muted">{isExpenseAdmin ? 'Expense Applications' : 'Timesheet Applications'}</p>
+              <h2>{selectedEmployee?.name || 'Employee'} {isExpenseAdmin ? 'Expense' : 'Timesheet'} Detail</h2>
+            </div>
+            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
                 <select
                   className="select"
                   value={selectedEmployeeId}
@@ -4016,17 +4120,58 @@ function ManagerAdminCategory({
                 </select>
                 <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
                 <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
-              </div>
             </div>
           </div>
 
           {isExpenseAdmin ? (
-            <ClaimList
-              claims={selectedEmployeeClaims}
-              setReceipt={setReceipt}
-              manager
-              updateClaim={updateClaim}
-            />
+            <>
+              <ClaimList
+                claims={selectedEmployeeClaims}
+                setReceipt={setReceipt}
+                manager
+                updateClaim={updateClaim}
+              />
+
+              <div className="card">
+                <div className="card-content">
+                  <h2>Expense Employee Summary</h2>
+                  <p className="small muted">Pending staff stay at the top with a green light.</p>
+                  <div className="wide" style={{ marginTop: 14 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Department</th>
+                          <th>Pending</th>
+                          <th>Approved/Paid</th>
+                          <th>Rejected</th>
+                          <th>Total Claims</th>
+                          <th>Total Records</th>
+                          <th>Full Data</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {employeeRows.map(employee => (
+                          <tr key={employee.id} className={employee.pending ? 'employee-row-pending' : ''}>
+                            <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
+                            <td>{employee.department}</td>
+                            <td>
+                              {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
+                              {employee.pending}
+                            </td>
+                            <td>{employee.approved}</td>
+                            <td>{employee.rejected}</td>
+                            <td>{money(employee.totalAmount)}</td>
+                            <td>{employee.total}</td>
+                            <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <TimesheetApprovalDetail
@@ -4194,6 +4339,29 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
       {claims.map(c => {
         const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
         const isExpense = claimType === 'expense';
+        const expenseItems = c.expenses || [];
+        const expenseDecisionAmount = (expense) =>
+          expense.approvalStatus === 'rejected'
+            ? Number(expense.approvedAmount || 0)
+            : Number(expense.amount || 0);
+        const approvedExpenseAmount = expenseItems.reduce((sum, expense) => sum + expenseDecisionAmount(expense), 0);
+        const allExpenseItemsApproved = expenseItems.length > 0 && expenseItems.every(expense => expense.approvalStatus !== 'rejected');
+        const updateExpenseItems = (mapper) => {
+          const nextExpenses = expenseItems.map(mapper);
+          const nextApprovedAmount = nextExpenses.reduce((sum, expense) => {
+            return sum + (expense.approvalStatus === 'rejected'
+              ? Number(expense.approvedAmount || 0)
+              : Number(expense.amount || 0));
+          }, 0);
+          updateClaim(c.id, { expenses: nextExpenses, approvedAmount: nextApprovedAmount });
+        };
+        const setAllExpenseItemsApproved = (approved) => {
+          updateExpenseItems(expense => ({
+            ...expense,
+            approvalStatus: approved ? 'approved' : 'rejected',
+            approvedAmount: approved ? Number(expense.amount || 0) : (expense.approvedAmount || '')
+          }));
+        };
 
         return (
           <div className="card" key={c.id}>
@@ -4226,8 +4394,21 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                     <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
                     <Mini label="Items" value={String(c.expenses?.length || 0)} />
                     <Mini label="Status" value={c.status} />
-                    <Mini label="Company Approved Amount" value={c.approvedAmount === undefined || c.approvedAmount === '' ? '—' : money(c.approvedAmount)} />
+                    <Mini label="Company Approved Amount" value={money(c.approvedAmount ?? approvedExpenseAmount)} />
                   </div>
+
+                  {manager && (
+                    <div className="flex gap items-center" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={allExpenseItemsApproved}
+                          onChange={event => setAllExpenseItemsApproved(event.target.checked)}
+                        />
+                        Select all approved
+                      </label>
+                    </div>
+                  )}
 
                   <div className="wide">
                     <table>
@@ -4240,11 +4421,15 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                           <th>Amount</th>
                           <th>VAT</th>
                           <th>Proof</th>
+                          {manager && <th>Approve</th>}
+                          {manager && <th>Approved Amount</th>}
                         </tr>
                       </thead>
 
                       <tbody>
-                        {c.expenses?.map(e => (
+                        {expenseItems.map(e => {
+                          const isItemApproved = e.approvalStatus !== 'rejected';
+                          return (
                           <tr key={e.id}>
                             <td>{e.date || '—'}</td>
                             <td>{e.category}</td>
@@ -4257,8 +4442,39 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                                 ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
                                 : 'Missing'}
                             </td>
+                            {manager && (
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={isItemApproved}
+                                  onChange={event => updateExpenseItems(expense => expense.id === e.id
+                                    ? {
+                                        ...expense,
+                                        approvalStatus: event.target.checked ? 'approved' : 'rejected',
+                                        approvedAmount: event.target.checked ? Number(expense.amount || 0) : (expense.approvedAmount || '')
+                                      }
+                                    : expense)}
+                                />
+                              </td>
+                            )}
+                            {manager && (
+                              <td>
+                                <input
+                                  className="input"
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  disabled={isItemApproved}
+                                  value={isItemApproved ? Number(e.amount || 0) : (e.approvedAmount || '')}
+                                  onChange={event => updateExpenseItems(expense => expense.id === e.id
+                                    ? { ...expense, approvalStatus: 'rejected', approvedAmount: event.target.value }
+                                    : expense)}
+                                />
+                              </td>
+                            )}
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -4318,39 +4534,11 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                   <label className="label">Manager Note</label>
                   <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />
 
-                  {isExpense && (
-                    <div className="grid grid-2" style={{ alignItems: 'end' }}>
-                      <label className="flex gap items-center" style={{ background: 'white', border: '1px solid #cbd5e1', borderRadius: 12, padding: 12 }}>
-                        <input
-                          type="checkbox"
-                          checked={c.companyPaidFull !== false}
-                          onChange={event => updateClaim(c.id, {
-                            companyPaidFull: event.target.checked,
-                            approvedAmount: event.target.checked ? Number(c.totals?.totalExpense || 0) : (c.approvedAmount || '')
-                          })}
-                        />
-                        <span>
-                          <b>Paid / approve full application amount</b>
-                          <br />
-                          <span className="xsmall muted">Untick to manually enter a different company approved amount.</span>
-                        </span>
-                      </label>
-
-                      <Field
-                        label="Approved Amount"
-                        type="number"
-                        disabled={c.companyPaidFull !== false}
-                        value={c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : (c.approvedAmount || '')}
-                        onChange={value => updateClaim(c.id, { approvedAmount: value, companyPaidFull: false })}
-                      />
-                    </div>
-                  )}
-
                   <button
                     className="btn"
                     onClick={() => updateClaim(c.id, {
                       status: 'Approved',
-                      approvedAmount: isExpense && c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : c.approvedAmount
+                      approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
                     })}
                   >
                     <CheckCircle2 size={16} /> Approve
@@ -4360,7 +4548,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                     className="btn danger"
                     onClick={() => updateClaim(c.id, {
                       status: 'Rejected',
-                      approvedAmount: isExpense && c.companyPaidFull !== false ? 0 : c.approvedAmount
+                      approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
                     })}
                   >
                     <XCircle size={16} /> Reject
@@ -4372,8 +4560,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                         className="btn secondary"
                         onClick={() => updateClaim(c.id, {
                           status: 'Paid',
-                          companyPaidFull: c.companyPaidFull !== false,
-                          approvedAmount: c.companyPaidFull !== false ? Number(c.totals?.totalExpense || 0) : c.approvedAmount
+                          approvedAmount: approvedExpenseAmount
                         })}
                       >
                         Mark as Paid
