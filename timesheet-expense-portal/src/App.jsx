@@ -813,16 +813,25 @@ export default function App() {
     };
   };
 
-  const buildExpenseClaim = status => ({
-    ...commonClaimFields(status),
-    type: 'expense',
-    week: '',
-    weekLabel: '',
-    expenseMonth: currentMonthValue(),
-    periodLabel: monthLabel(currentMonthValue()),
-    expenses,
-    totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
-  });
+  const buildExpenseClaim = status => {
+    const baseClaim = commonClaimFields(status);
+    const applicationSubmittedAt = baseClaim.submittedAt || new Date().toLocaleString('en-GB');
+
+    return {
+      ...baseClaim,
+      type: 'expense',
+      week: '',
+      weekLabel: '',
+      expenseMonth: currentMonthValue(),
+      periodLabel: monthLabel(currentMonthValue()),
+      expenses: expenses.map(expense => ({
+        ...expense,
+        applicationId: expense.applicationId || baseClaim.id,
+        applicationSubmittedAt: expense.applicationSubmittedAt || applicationSubmittedAt
+      })),
+      totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
+    };
+  };
 
   const saveDraft = () => {
     upsertClaim(buildTimesheetClaim('Draft'));
@@ -4273,10 +4282,50 @@ function ManagerAdminCategory({
   );
 }
 
+function expenseApplicationClaimsFromMonthlyClaim(claim) {
+  if (!claim) return [];
+
+  const groups = (claim.expenses || []).reduce((acc, expense, index) => {
+    const key = expense.applicationId || expense.applicationSubmittedAt || claim.submittedAt || `${claim.id}-legacy-${index}`;
+    const existing = acc[key] || {
+      key,
+      applicationSubmittedAt: expense.applicationSubmittedAt || claim.submittedAt || '',
+      expenses: []
+    };
+
+    existing.expenses.push(expense);
+    acc[key] = existing;
+    return acc;
+  }, {});
+
+  return Object.values(groups).map((group, index) => {
+    const totalExpense = group.expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+    const totalVAT = group.expenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
+    const applicationLabel = group.applicationSubmittedAt
+      ? `Application ${index + 1} - ${group.applicationSubmittedAt}`
+      : `Application ${index + 1}`;
+
+    return {
+      ...claim,
+      id: `${claim.id}-${group.key}`,
+      periodLabel: applicationLabel,
+      expenses: group.expenses,
+      totals: {
+        ...(claim.totals || {}),
+        totalExpense,
+        totalVAT
+      },
+      applicationSubmittedAt: group.applicationSubmittedAt
+    };
+  });
+}
+
 function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, setReceipt, updateClaim }) {
+  const [detailViewMode, setDetailViewMode] = useState('month');
   const selectedIndex = Math.max(0, claims.findIndex(item => item.id === selectedClaimId));
   const canMovePrevious = claims.length > 1 && selectedIndex > 0;
   const canMoveNext = claims.length > 1 && selectedIndex < claims.length - 1;
+  const applicationClaims = expenseApplicationClaimsFromMonthlyClaim(claim);
 
   const moveClaim = (direction) => {
     if (!claims.length) return;
@@ -4300,20 +4349,46 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
             <h2>Expense Claim Detail</h2>
             <p className="small muted">{claim.employeeName} - {claim.periodLabel || monthLabel(getClaimExpenseMonth(claim))}</p>
           </div>
-          <div className="request-stepper">
-            <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveClaim(-1)}>{'<'}</button>
-            <span className="request-stepper-count">{claims.length ? `${selectedIndex + 1} / ${claims.length}` : '0 / 0'}</span>
-            <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveClaim(1)}>{'>'}</button>
+          <div className="flex gap items-center" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div className="detail-view-switch" aria-label="Expense detail view mode">
+              <button
+                className={detailViewMode === 'month' ? 'active' : ''}
+                type="button"
+                onClick={() => setDetailViewMode('month')}
+              >
+                By Month
+              </button>
+              <button
+                className={detailViewMode === 'application' ? 'active' : ''}
+                type="button"
+                onClick={() => setDetailViewMode('application')}
+              >
+                By Application
+              </button>
+            </div>
+            <div className="request-stepper">
+              <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveClaim(-1)}>{'<'}</button>
+              <span className="request-stepper-count">{claims.length ? `${selectedIndex + 1} / ${claims.length}` : '0 / 0'}</span>
+              <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveClaim(1)}>{'>'}</button>
+            </div>
           </div>
         </div>
       </div>
 
-      <ClaimList
-        claims={[claim]}
-        setReceipt={setReceipt}
-        manager
-        updateClaim={updateClaim}
-      />
+      {detailViewMode === 'month' ? (
+        <ClaimList
+          claims={[claim]}
+          setReceipt={setReceipt}
+          manager
+          updateClaim={updateClaim}
+        />
+      ) : (
+        <ClaimList
+          claims={applicationClaims}
+          setReceipt={setReceipt}
+          managerReadOnly
+        />
+      )}
     </div>
   );
 }
@@ -4416,7 +4491,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
   );
 }
 
-function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, activeUser }) {
+function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updateClaim, startEditClaim, activeUser }) {
   if (!claims.length) {
     return (
       <div className="card">
@@ -4457,7 +4532,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
         };
 
         return (
-          <div className={`card ${manager && isExpense ? `expense-detail-card expense-detail-${c.status || 'Draft'}` : ''}`} key={c.id}>
+          <div className={`card ${(manager || managerReadOnly) && isExpense ? `expense-detail-card expense-detail-${c.status || 'Draft'}` : ''}`} key={c.id}>
             <div className="card-content">
               <div className="flex justify-between gap" style={{ flexWrap: 'wrap' }}>
                 <div>
@@ -4489,7 +4564,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                     <Mini label="Company Approved Amount" value={money(c.approvedAmount ?? approvedExpenseAmount)} />
                   </div>
 
-                  {manager && (
+                  {manager && !managerReadOnly && (
                     <div className="flex gap items-center" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                       <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <input
@@ -4513,8 +4588,8 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                           <th>Amount</th>
                           <th>VAT</th>
                           <th>Proof</th>
-                          {manager && <th>Approve</th>}
-                          {manager && <th>Approved Amount</th>}
+                          {manager && !managerReadOnly && <th>Approve</th>}
+                          {manager && !managerReadOnly && <th>Approved Amount</th>}
                         </tr>
                       </thead>
 
@@ -4534,7 +4609,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                                 ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
                                 : 'Missing'}
                             </td>
-                            {manager && (
+                            {manager && !managerReadOnly && (
                               <td>
                                 <input
                                   type="checkbox"
@@ -4549,7 +4624,7 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                                 />
                               </td>
                             )}
-                            {manager && (
+                            {manager && !managerReadOnly && (
                               <td>
                                 <input
                                   className="input"
@@ -4621,7 +4696,20 @@ function ClaimList({ claims, setReceipt, manager, updateClaim, startEditClaim, a
                 </div>
               )}
 
-              {manager && (
+              {managerReadOnly && isExpense && (
+                <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 16 }}>
+                  <button
+                    className="btn secondary"
+                    type="button"
+                    disabled={claimReceiptItems.length === 0}
+                    onClick={() => downloadReceiptItems(claimReceiptItems, { asZip: true, zipName: claimReceiptZipName })}
+                  >
+                    Download This Application Proofs ({claimReceiptItems.length})
+                  </button>
+                </div>
+              )}
+
+              {manager && !managerReadOnly && (
                 <div className="space-y-sm" style={{ background: '#f8fafc', padding: 16, borderRadius: 20, marginTop: 16 }}>
                   <label className="label">Manager Note</label>
                   <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />

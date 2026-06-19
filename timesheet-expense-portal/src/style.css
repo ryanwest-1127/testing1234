@@ -71,6 +71,9 @@ th { color: #64748b; font-weight: 700; }
 .request-stepper { display: grid; grid-template-columns: 42px minmax(64px, auto) 42px; align-items: center; gap: 8px; }
 .request-stepper .btn { min-width: 42px; padding: 8px 0; }
 .request-stepper-count { min-width: 64px; text-align: center; font-weight: 800; color: #475569; }
+.detail-view-switch { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: #f1f5f9; border: 1px solid #cbd5e1; }
+.detail-view-switch button { border: 0; border-radius: 999px; padding: 8px 12px; cursor: pointer; color: #475569; background: transparent; font-weight: 800; font-size: 12px; }
+.detail-view-switch button.active { background: #0f172a; color: white; }
 .al-calendar-grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); gap: 6px; }
 .al-week-number { min-height: 92px; border-radius: 14px; background: #f8fafc; color: #475569; font-weight: 900; display: flex; align-items: center; justify-content: center; border: 1px solid #e2e8f0; }
 .month-stepper { display: grid; grid-template-columns: 42px minmax(150px, auto) 42px; align-items: center; gap: 10px; }
