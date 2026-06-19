@@ -4457,10 +4457,10 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
 
       {detailViewMode === 'month' ? (
         <ClaimList
-          claims={applicationClaims}
+          claims={[claim]}
           setReceipt={setReceipt}
           manager
-          updateClaim={updateExpenseApplication}
+          updateClaim={updateClaim}
         />
       ) : (
         <ClaimList
@@ -4587,7 +4587,14 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
       {claims.map(c => {
         const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
         const isExpense = claimType === 'expense';
-        const expenseItems = c.expenses || [];
+        const expenseItems = isExpense
+          ? [...(c.expenses || [])].sort((a, b) => {
+              const statusRank = { Submitted: 0, Approved: 1, Paid: 1, Rejected: 2 };
+              return (statusRank[a.applicationStatus || c.status || 'Submitted'] ?? 3) -
+                (statusRank[b.applicationStatus || c.status || 'Submitted'] ?? 3) ||
+                String(b.applicationSubmittedAt || '').localeCompare(String(a.applicationSubmittedAt || ''));
+            })
+          : [];
         const expenseStatus = isExpense ? (c.applicationStatus || c.status || 'Submitted') : c.status;
         const isLockedExpense = manager && isExpense && ['Approved', 'Paid', 'Rejected'].includes(expenseStatus) && !editingLockedExpenseIds[c.id];
         const canManageExpense = manager && isExpense && !managerReadOnly && !isLockedExpense;
@@ -4600,7 +4607,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
         const claimReceiptItems = receiptDownloadItemsFromClaims([c]);
         const claimReceiptZipName = `${sanitizeFilenamePart(c.employeeName || 'Employee')}_${sanitizeFilenamePart(c.periodLabel || getClaimExpenseMonth(c) || c.id)}_receipt-proofs.zip`;
         const updateExpenseItems = (mapper) => {
-          const nextExpenses = expenseItems.map(mapper);
+          const nextExpenses = (c.expenses || []).map(mapper);
           const nextApprovedAmount = nextExpenses.reduce((sum, expense) => {
             return sum + (expense.approvalStatus === 'rejected'
               ? Number(expense.approvedAmount || 0)
@@ -4672,6 +4679,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                           <th>Description</th>
                           <th>Amount</th>
                           <th>VAT</th>
+                          {manager && isExpense && <th>App Status</th>}
                           <th>Proof</th>
                           {canManageExpense && <th>Approve</th>}
                           {canManageExpense && <th>Approved Amount</th>}
@@ -4689,6 +4697,9 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                             <td>{e.description || '—'}</td>
                             <td><b>{money(e.amount)}</b></td>
                             <td><b>{money(e.vat)}</b></td>
+                            {manager && isExpense && (
+                              <td><span className={`badge ${e.applicationStatus || c.status || 'Submitted'}`}>{e.applicationStatus || c.status || 'Submitted'}</span></td>
+                            )}
                             <td>
                               {e.receiptName
                                 ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
@@ -4834,7 +4845,12 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                           onClick={() => {
                             updateClaim(c.id, {
                               status: 'Approved',
-                              approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
+                              approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount,
+                              expenses: isExpense ? (c.expenses || []).map(expense => ({
+                                ...expense,
+                                applicationStatus: 'Approved',
+                                applicationManagerNote: c.applicationManagerNote || c.managerNote || ''
+                              })) : c.expenses
                             });
                             setEditingLockedExpenseIds(prev => ({ ...prev, [c.id]: false }));
                           }}
@@ -4846,7 +4862,12 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                           onClick={() => {
                             updateClaim(c.id, {
                               status: 'Rejected',
-                              approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
+                              approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount,
+                              expenses: isExpense ? (c.expenses || []).map(expense => ({
+                                ...expense,
+                                applicationStatus: 'Rejected',
+                                applicationManagerNote: c.applicationManagerNote || c.managerNote || ''
+                              })) : c.expenses
                             });
                             setEditingLockedExpenseIds(prev => ({ ...prev, [c.id]: false }));
                           }}
