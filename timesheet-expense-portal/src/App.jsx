@@ -778,11 +778,33 @@ export default function App() {
     type: 'expense',
     week: '',
     weekLabel: '',
-    expenseMonth: selectedExpenseMonth || currentMonthValue(),
-    periodLabel: monthLabel(selectedExpenseMonth || currentMonthValue()),
+    expenseMonth: expenses.find(expense => expense.date)?.date?.slice(0, 7) || selectedExpenseMonth || currentMonthValue(),
+    periodLabel: monthLabel(expenses.find(expense => expense.date)?.date?.slice(0, 7) || selectedExpenseMonth || currentMonthValue()),
     expenses,
     totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
   });
+
+  const buildExpenseClaimsByDateMonth = status => {
+    const groups = expenses.reduce((acc, expense) => {
+      const month = expense.date?.slice(0, 7) || selectedExpenseMonth || currentMonthValue();
+      acc[month] = [...(acc[month] || []), expense];
+      return acc;
+    }, {});
+
+    return Object.entries(groups).map(([month, monthExpenses]) => ({
+      ...commonClaimFields(status),
+      type: 'expense',
+      week: '',
+      weekLabel: '',
+      expenseMonth: month,
+      periodLabel: monthLabel(month),
+      expenses: monthExpenses,
+      totals: {
+        totalExpense: monthExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0),
+        totalVAT: monthExpenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0)
+      }
+    }));
+  };
 
   const saveDraft = () => {
     upsertClaim(buildTimesheetClaim('Draft'));
@@ -804,7 +826,7 @@ export default function App() {
       return;
     }
 
-    upsertClaim(buildExpenseClaim('Submitted'));
+    buildExpenseClaimsByDateMonth('Submitted').forEach(claim => upsertClaim(claim));
     setExpenses([makeExpense()]);
     setTab('dashboard');
   };
@@ -3042,15 +3064,7 @@ function ExpenseForm(p) {
               <input className="input" value={p.employeeInfo.employeeName} disabled readOnly />
             )}
           </div>
-          <div>
-            <label className="label">Month</label>
-            <input
-              className="input"
-              type="month"
-              value={p.selectedExpenseMonth}
-              onChange={ev => p.setSelectedExpenseMonth(ev.target.value)}
-            />
-          </div>
+          <Mini label="Month Sorting" value="Auto by item date" />
           <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
           <Mini label="Current VAT Total" value={money(currentVATTotal)} />
         </div>
@@ -3435,20 +3449,6 @@ function ManagerAnnualLeaveAdmin({
               <p className="small muted">Annual Leave Requests</p>
               <h2>{selectedEmployee?.name || 'Employee'} Annual Leave</h2>
             </div>
-            <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-                <select
-                  className="select"
-                  value={selectedEmployeeId}
-                  onChange={event => setSelectedEmployeeId(event.target.value)}
-                  style={{ maxWidth: 220 }}
-                >
-                  {employeeRows.map(employee => (
-                    <option key={employee.id} value={employee.id}>{employee.name}</option>
-                  ))}
-                </select>
-                <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
-                <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
-            </div>
           </div>
 
           <div className="grid grid-3">
@@ -3512,6 +3512,10 @@ function ManagerAnnualLeaveAdmin({
                 </table>
               </div>
             </div>
+          </div>
+
+          <div className="flex" style={{ justifyContent: 'flex-end' }}>
+            <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
           </div>
         </>
       )}
@@ -3827,16 +3831,24 @@ function ManagerAdminCategory({
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [selectedClaimId, setSelectedClaimId] = useState('');
+  const [expenseSummaryMonth, setExpenseSummaryMonth] = useState('All');
   const receiptItems = receiptDownloadItemsFromClaims(claims);
   const isExpenseAdmin = claims.some(claim => claimTypeOf(claim) === 'expense');
   const pendingClaims = claims.filter(claim => claim.status === 'Submitted');
-  const expenseGross = isExpenseAdmin ? claims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0) : 0;
+  const expenseMonthOptions = isExpenseAdmin
+    ? Array.from(new Set(claims.map(claim => getClaimExpenseMonth(claim)).filter(Boolean))).sort().reverse()
+    : [];
+  const approvedExpenseClaimsForSummary = isExpenseAdmin
+    ? claims.filter(claim => ['Approved', 'Paid'].includes(claim.status))
+        .filter(claim => expenseSummaryMonth === 'All' || getClaimExpenseMonth(claim) === expenseSummaryMonth)
+    : [];
+  const expenseGross = isExpenseAdmin ? approvedExpenseClaimsForSummary.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0) : 0;
   const expenseApprovedPaid = isExpenseAdmin
-    ? claims.filter(claim => ['Approved', 'Paid'].includes(claim.status)).reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0)
+    ? approvedExpenseClaimsForSummary.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0)
     : 0;
-  const expenseVat = isExpenseAdmin ? claims.reduce((sum, claim) => sum + Number(claim.totals?.totalVAT || 0), 0) : 0;
+  const expenseVat = isExpenseAdmin ? approvedExpenseClaimsForSummary.reduce((sum, claim) => sum + Number(claim.totals?.totalVAT || 0), 0) : 0;
   const expenseByCategory = isExpenseAdmin
-    ? Object.values(claims.reduce((groups, claim) => {
+    ? Object.values(approvedExpenseClaimsForSummary.reduce((groups, claim) => {
         (claim.expenses || []).forEach(expense => {
           const category = expense.category || 'Other';
           const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
@@ -3932,21 +3944,29 @@ function ManagerAdminCategory({
               <div>
                 <p className="small muted">Company Expense Overview</p>
                 <h2>Expense Overall Summary</h2>
-                <p className="small muted">Company expense by category, built from all employee expense items.</p>
+                <p className="small muted">Approved and paid expenses only. Pending claims are not included yet.</p>
               </div>
-              <button
-                className="btn secondary"
-                type="button"
-                disabled={receiptItems.length === 0}
-                onClick={() => downloadReceiptItems(receiptItems)}
-              >
-                Download All Receipt Proofs ({receiptItems.length})
-              </button>
+              <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+                <select className="select" value={expenseSummaryMonth} onChange={event => setExpenseSummaryMonth(event.target.value)} style={{ width: 200 }}>
+                  <option value="All">All Approved Months</option>
+                  {expenseMonthOptions.map(month => (
+                    <option key={month} value={month}>{monthLabel(month)}</option>
+                  ))}
+                </select>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  disabled={receiptItems.length === 0}
+                  onClick={() => downloadReceiptItems(receiptItems)}
+                >
+                  Download All Receipt Proofs ({receiptItems.length})
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-4" style={{ marginTop: 14 }}>
-              <Mini label="Company Expense Total" value={money(Math.max(0, expenseGross - expenseApprovedPaid))} />
-              <Mini label="All Expense Claims" value={money(expenseGross)} />
+              <Mini label="Approved Expense Total" value={money(expenseGross)} />
+              <Mini label="Approved Claims" value={money(expenseGross)} />
               <Mini label="Approved / Paid" value={money(expenseApprovedPaid)} />
               <Mini label="Company VAT Total" value={money(expenseVat)} />
             </div>
@@ -4107,28 +4127,16 @@ function ManagerAdminCategory({
               <p className="small muted">{isExpenseAdmin ? 'Expense Applications' : 'Timesheet Applications'}</p>
               <h2>{selectedEmployee?.name || 'Employee'} {isExpenseAdmin ? 'Expense' : 'Timesheet'} Detail</h2>
             </div>
-            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
-                <select
-                  className="select"
-                  value={selectedEmployeeId}
-                  onChange={event => setSelectedEmployeeId(event.target.value)}
-                  style={{ maxWidth: 220 }}
-                >
-                  {employeeRows.map(employee => (
-                    <option key={employee.id} value={employee.id}>{employee.name}</option>
-                  ))}
-                </select>
-                <button className="btn secondary" type="button" onClick={closeAdmin}>Back to Dashboard</button>
-                <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
-            </div>
           </div>
 
           {isExpenseAdmin ? (
             <>
-              <ClaimList
+              <ExpenseApprovalDetail
                 claims={selectedEmployeeClaims}
+                claim={selectedEmployeeSelectedClaim}
+                selectedClaimId={selectedClaimId}
+                setSelectedClaimId={setSelectedClaimId}
                 setReceipt={setReceipt}
-                manager
                 updateClaim={updateClaim}
               />
 
@@ -4221,8 +4229,56 @@ function ManagerAdminCategory({
               </div>
             </>
           )}
+          <div className="flex" style={{ justifyContent: 'flex-end' }}>
+            <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
+          </div>
         </>
       )}
+    </div>
+  );
+}
+
+function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, setReceipt, updateClaim }) {
+  const selectedIndex = Math.max(0, claims.findIndex(item => item.id === selectedClaimId));
+  const canMovePrevious = claims.length > 1 && selectedIndex > 0;
+  const canMoveNext = claims.length > 1 && selectedIndex < claims.length - 1;
+
+  const moveClaim = (direction) => {
+    if (!claims.length) return;
+    const nextIndex = Math.min(Math.max(selectedIndex + direction, 0), claims.length - 1);
+    setSelectedClaimId(claims[nextIndex]?.id || '');
+  };
+
+  if (!claim) {
+    return (
+      <div className="card">
+        <div className="card-content muted">No expense records in this view for this employee.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-sm">
+      <div className="card">
+        <div className="card-content flex justify-between items-center" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h2>Expense Claim Detail</h2>
+            <p className="small muted">{claim.employeeName} - {claim.periodLabel || monthLabel(getClaimExpenseMonth(claim))}</p>
+          </div>
+          <div className="request-stepper">
+            <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveClaim(-1)}>{'<'}</button>
+            <span className="request-stepper-count">{claims.length ? `${selectedIndex + 1} / ${claims.length}` : '0 / 0'}</span>
+            <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveClaim(1)}>{'>'}</button>
+          </div>
+        </div>
+      </div>
+
+      <ClaimList
+        claims={[claim]}
+        setReceipt={setReceipt}
+        manager
+        updateClaim={updateClaim}
+      />
     </div>
   );
 }
