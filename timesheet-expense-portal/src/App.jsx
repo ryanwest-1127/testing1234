@@ -139,6 +139,13 @@ function monthLabel(monthValue) {
     .toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 }
 
+function monthFromSubmittedAt(submittedAt) {
+  const match = String(submittedAt || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!match) return '';
+
+  return `${match[3]}-${String(match[2]).padStart(2, '0')}`;
+}
+
 function defaultTimesheet() {
   return Object.fromEntries(
     weekDays.map(day => [
@@ -363,7 +370,7 @@ function claimPeriodKey(claim) {
 function getClaimExpenseMonth(claim) {
   return claim.expenseMonth ||
     claim.month ||
-    claim.expenses?.find(expense => expense.date)?.date?.slice(0, 7) ||
+    monthFromSubmittedAt(claim.submittedAt) ||
     currentMonthValue();
 }
 
@@ -811,8 +818,8 @@ export default function App() {
     type: 'expense',
     week: '',
     weekLabel: '',
-    expenseMonth: expenses.find(expense => expense.date)?.date?.slice(0, 7) || selectedExpenseMonth || currentMonthValue(),
-    periodLabel: monthLabel(expenses.find(expense => expense.date)?.date?.slice(0, 7) || selectedExpenseMonth || currentMonthValue()),
+    expenseMonth: currentMonthValue(),
+    periodLabel: monthLabel(currentMonthValue()),
     expenses,
     totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
   });
@@ -902,7 +909,7 @@ export default function App() {
       const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
       const vatTotal = expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
       const selectedEmployee = employees.find(e => e.id === employeeInfo.employeeId);
-      const inferredExpenseMonth = expenses.find(expense => expense.date)?.date?.slice(0, 7) || getClaimExpenseMonth(editingOriginalClaim) || currentMonthValue();
+      const inferredExpenseMonth = getClaimExpenseMonth(editingOriginalClaim) || currentMonthValue();
 
       updatedClaim = {
         ...editingOriginalClaim,
@@ -991,14 +998,40 @@ export default function App() {
       if (existingIndex >= 0) {
         return prev.map((c, index) =>
           index === existingIndex
-            ? {
-                ...c,
-                ...newClaim,
-                id: c.id,
-                type: newType,
-                status: newClaim.status || c.status || 'Submitted',
-                updatedAt: new Date().toLocaleString('en-GB')
-              }
+            ? (() => {
+                if (newType !== 'expense') {
+                  return {
+                    ...c,
+                    ...newClaim,
+                    id: c.id,
+                    type: newType,
+                    status: newClaim.status || c.status || 'Submitted',
+                    updatedAt: new Date().toLocaleString('en-GB')
+                  };
+                }
+
+                const mergedExpenses = [...(c.expenses || []), ...(newClaim.expenses || [])];
+                const totalExpense = mergedExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+                const totalVAT = mergedExpenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
+
+                return {
+                  ...c,
+                  ...newClaim,
+                  id: c.id,
+                  type: newType,
+                  status: newClaim.status || c.status || 'Submitted',
+                  submittedAt: c.submittedAt || newClaim.submittedAt,
+                  expenses: mergedExpenses,
+                  totals: {
+                    ...(c.totals || {}),
+                    ...(newClaim.totals || {}),
+                    totalExpense,
+                    totalVAT
+                  },
+                  approvedAmount: undefined,
+                  updatedAt: new Date().toLocaleString('en-GB')
+                };
+              })()
             : c
         );
       }
@@ -1953,34 +1986,34 @@ function Dashboard({
 
   return (
     <div className="space-y">
-      <div className="card">
-        <div className="card-content flex justify-between gap items-center" style={{ flexWrap: 'wrap' }}>
-          <div>
-            <h2>Dashboard</h2>
-            <p className="small muted">
-              {isManager
-                ? isManagerOverallDashboard
-                  ? 'Overall company approval dashboard.'
-                  : 'Personal dashboard for your own manager account data.'
-                : 'Select Current for status, or choose a week for detailed breakdown.'}
-            </p>
-          </div>
+      {!isManagerOverallDashboard && (
+        <div className="card">
+          <div className="card-content flex justify-between gap items-center" style={{ flexWrap: 'wrap' }}>
+            <div>
+              <h2>Dashboard</h2>
+              <p className="small muted">
+                {isManager
+                  ? 'Personal dashboard for your own manager account data.'
+                  : 'Select Current for status, or choose a week for detailed breakdown.'}
+              </p>
+            </div>
 
-          <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-            {(!isManager || isManagerPersonalDashboard) && (
-              <>
-                <label className="label">View week</label>
-                <select className="select" value={dashboardWeek} onChange={e => setDashboardWeek(e.target.value)} style={{ width: 260 }}>
-                  <option value="current">Current status</option>
-                  {weekOptions.map(week => (
-                    <option key={week} value={week}>{weekLabel(week)}</option>
-                  ))}
-                </select>
-              </>
-            )}
+            <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+              {(!isManager || isManagerPersonalDashboard) && (
+                <>
+                  <label className="label">View week</label>
+                  <select className="select" value={dashboardWeek} onChange={e => setDashboardWeek(e.target.value)} style={{ width: 260 }}>
+                    <option value="current">Current status</option>
+                    {weekOptions.map(week => (
+                      <option key={week} value={week}>{weekLabel(week)}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {isManagerOverallDashboard && (
         <div className="card">
@@ -3068,7 +3101,7 @@ function ExpenseForm(p) {
               <input className="input" value={p.employeeInfo.employeeName} disabled readOnly />
             )}
           </div>
-          <Mini label="Month Sorting" value="Auto by item date" />
+          <Mini label="Claim Month" value={monthLabel(currentMonthValue())} />
           <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
           <Mini label="Current VAT Total" value={money(currentVATTotal)} />
         </div>
@@ -3842,7 +3875,8 @@ function ManagerAdminCategory({
   const expenseMonthOptions = isExpenseAdmin
     ? Array.from(new Set(claims
         .filter(claim => ['Approved', 'Paid'].includes(claim.status))
-        .flatMap(claim => (claim.expenses || []).map(expense => expense.date?.slice(0, 7) || getClaimExpenseMonth(claim)).filter(Boolean))
+        .map(claim => getClaimExpenseMonth(claim))
+        .filter(Boolean)
       )).sort().reverse()
     : [];
   const approvedExpenseItemsForSummary = isExpenseAdmin
@@ -3851,7 +3885,7 @@ function ManagerAdminCategory({
         .flatMap(claim => (claim.expenses || []).map(expense => ({
           claim,
           expense,
-          month: expense.date?.slice(0, 7) || getClaimExpenseMonth(claim)
+          month: getClaimExpenseMonth(claim)
         })))
         .filter(item => expenseSummaryMonth === 'All' || item.month === expenseSummaryMonth)
     : [];
