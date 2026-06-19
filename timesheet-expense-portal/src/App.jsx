@@ -378,6 +378,36 @@ function claimUniqueKey(claim) {
   return `${claim.employeeId || ''}|${claimPeriodKey(claim)}|${claimTypeOf(claim)}`;
 }
 
+function expenseApplicationKey(expense, claim, index = 0) {
+  return expense.applicationId || expense.applicationSubmittedAt || claim?.submittedAt || `${claim?.id || 'expense'}-legacy-${index}`;
+}
+
+function expenseApplicationStatusFromItems(expenses, fallbackStatus = 'Submitted') {
+  const statuses = (expenses || []).map(expense => expense.applicationStatus || fallbackStatus || 'Submitted');
+
+  if (!statuses.length) return fallbackStatus || 'Submitted';
+  if (statuses.some(status => status === 'Submitted')) return 'Submitted';
+  if (statuses.some(status => status === 'Approved' || status === 'Paid')) return 'Approved';
+  if (statuses.every(status => status === 'Rejected')) return 'Rejected';
+
+  return statuses[0] || fallbackStatus || 'Submitted';
+}
+
+function expenseClaimStatusFromItems(expenses, fallbackStatus = 'Submitted') {
+  const statuses = Object.values((expenses || []).reduce((groups, expense, index) => {
+    const key = expenseApplicationKey(expense, null, index);
+    groups[key] = [...(groups[key] || []), expense];
+    return groups;
+  }, {})).map(group => expenseApplicationStatusFromItems(group, fallbackStatus));
+
+  if (!statuses.length) return fallbackStatus || 'Submitted';
+  if (statuses.some(status => status === 'Submitted')) return 'Submitted';
+  if (statuses.some(status => status === 'Approved' || status === 'Paid')) return 'Approved';
+  if (statuses.every(status => status === 'Rejected')) return 'Rejected';
+
+  return fallbackStatus || 'Submitted';
+}
+
 function uniqueClaimsByEmployeeWeekType(claims) {
   const seen = new Set();
   const result = [];
@@ -827,7 +857,8 @@ export default function App() {
       expenses: expenses.map(expense => ({
         ...expense,
         applicationId: expense.applicationId || baseClaim.id,
-        applicationSubmittedAt: expense.applicationSubmittedAt || applicationSubmittedAt
+        applicationSubmittedAt: expense.applicationSubmittedAt || applicationSubmittedAt,
+        applicationStatus: expense.applicationStatus || status
       })),
       totals: { totalExpense: currentExpenseTotal, totalVAT: currentVATTotal }
     };
@@ -1028,7 +1059,7 @@ export default function App() {
                   ...newClaim,
                   id: c.id,
                   type: newType,
-                  status: newClaim.status || c.status || 'Submitted',
+                  status: expenseClaimStatusFromItems(mergedExpenses, newClaim.status || c.status || 'Submitted'),
                   submittedAt: c.submittedAt || newClaim.submittedAt,
                   expenses: mergedExpenses,
                   totals: {
@@ -4286,7 +4317,7 @@ function expenseApplicationClaimsFromMonthlyClaim(claim) {
   if (!claim) return [];
 
   const groups = (claim.expenses || []).reduce((acc, expense, index) => {
-    const key = expense.applicationId || expense.applicationSubmittedAt || claim.submittedAt || `${claim.id}-legacy-${index}`;
+    const key = expenseApplicationKey(expense, claim, index);
     const existing = acc[key] || {
       key,
       applicationSubmittedAt: expense.applicationSubmittedAt || claim.submittedAt || '',
@@ -4301,13 +4332,22 @@ function expenseApplicationClaimsFromMonthlyClaim(claim) {
   return Object.values(groups).map((group, index) => {
     const totalExpense = group.expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     const totalVAT = group.expenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
+    const approvedAmount = group.expenses.reduce((sum, expense) => {
+      return sum + (expense.approvalStatus === 'rejected'
+        ? Number(expense.approvedAmount || 0)
+        : Number(expense.amount || 0));
+    }, 0);
     const applicationLabel = group.applicationSubmittedAt
       ? `Application ${index + 1} - ${group.applicationSubmittedAt}`
       : `Application ${index + 1}`;
+    const applicationStatus = expenseApplicationStatusFromItems(group.expenses, claim.status || 'Submitted');
 
     return {
       ...claim,
       id: `${claim.id}-${group.key}`,
+      parentClaimId: claim.id,
+      applicationKey: group.key,
+      applicationStatus,
       periodLabel: applicationLabel,
       expenses: group.expenses,
       totals: {
@@ -4315,8 +4355,15 @@ function expenseApplicationClaimsFromMonthlyClaim(claim) {
         totalExpense,
         totalVAT
       },
+      approvedAmount,
+      status: applicationStatus,
+      applicationManagerNote: group.expenses.find(expense => expense.applicationManagerNote)?.applicationManagerNote || '',
       applicationSubmittedAt: group.applicationSubmittedAt
     };
+  }).sort((a, b) => {
+    const statusRank = { Submitted: 0, Approved: 1, Paid: 1, Rejected: 2 };
+    return (statusRank[a.status] ?? 3) - (statusRank[b.status] ?? 3) ||
+      String(b.applicationSubmittedAt || '').localeCompare(String(a.applicationSubmittedAt || ''));
   });
 }
 
@@ -4326,6 +4373,39 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
   const canMovePrevious = claims.length > 1 && selectedIndex > 0;
   const canMoveNext = claims.length > 1 && selectedIndex < claims.length - 1;
   const applicationClaims = expenseApplicationClaimsFromMonthlyClaim(claim);
+
+  const updateExpenseApplication = (applicationId, patch) => {
+    if (!claim) return;
+    const applicationClaim = applicationClaims.find(item => item.id === applicationId);
+    if (!applicationClaim) return;
+
+    const patchExpensesById = new Map((patch.expenses || []).map(expense => [expense.id, expense]));
+    const nextExpenses = (claim.expenses || []).map((expense, index) => {
+      const belongsToApplication = expenseApplicationKey(expense, claim, index) === applicationClaim.applicationKey;
+
+      if (!belongsToApplication) return expense;
+
+      const patchedExpense = patchExpensesById.get(expense.id) || expense;
+      return {
+        ...patchedExpense,
+        applicationStatus: patch.status || patchedExpense.applicationStatus || applicationClaim.status || 'Submitted',
+        applicationManagerNote: patch.managerNote ?? patchedExpense.applicationManagerNote
+      };
+    });
+
+    const totalApprovedAmount = nextExpenses.reduce((sum, expense) => {
+      return sum + (expense.approvalStatus === 'rejected'
+        ? Number(expense.approvedAmount || 0)
+        : Number(expense.amount || 0));
+    }, 0);
+
+    updateClaim(claim.id, {
+      expenses: nextExpenses,
+      status: expenseClaimStatusFromItems(nextExpenses, claim.status || 'Submitted'),
+      approvedAmount: totalApprovedAmount,
+      managerNote: patch.managerNote ?? claim.managerNote
+    });
+  };
 
   const moveClaim = (direction) => {
     if (!claims.length) return;
@@ -4377,10 +4457,10 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
 
       {detailViewMode === 'month' ? (
         <ClaimList
-          claims={[claim]}
+          claims={applicationClaims}
           setReceipt={setReceipt}
           manager
-          updateClaim={updateClaim}
+          updateClaim={updateExpenseApplication}
         />
       ) : (
         <ClaimList
@@ -4492,6 +4572,8 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
 }
 
 function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updateClaim, startEditClaim, activeUser }) {
+  const [editingLockedExpenseIds, setEditingLockedExpenseIds] = useState({});
+
   if (!claims.length) {
     return (
       <div className="card">
@@ -4506,6 +4588,9 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
         const claimType = c.type || (c.expenses ? 'expense' : 'timesheet');
         const isExpense = claimType === 'expense';
         const expenseItems = c.expenses || [];
+        const expenseStatus = isExpense ? (c.applicationStatus || c.status || 'Submitted') : c.status;
+        const isLockedExpense = manager && isExpense && ['Approved', 'Paid', 'Rejected'].includes(expenseStatus) && !editingLockedExpenseIds[c.id];
+        const canManageExpense = manager && isExpense && !managerReadOnly && !isLockedExpense;
         const expenseDecisionAmount = (expense) =>
           expense.approvalStatus === 'rejected'
             ? Number(expense.approvedAmount || 0)
@@ -4532,7 +4617,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
         };
 
         return (
-          <div className={`card ${(manager || managerReadOnly) && isExpense ? `expense-detail-card expense-detail-${c.status || 'Draft'}` : ''}`} key={c.id}>
+          <div className={`card ${(manager || managerReadOnly) && isExpense ? `expense-detail-card expense-detail-${expenseStatus || 'Draft'}` : ''}`} key={c.id}>
             <div className="card-content">
               <div className="flex justify-between gap" style={{ flexWrap: 'wrap' }}>
                 <div>
@@ -4541,7 +4626,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                     {' '}
                     <span className="badge">{isExpense ? 'Expense' : 'Timesheet'}</span>
                     {' '}
-                    <span className={`badge ${c.status}`}>{c.status}</span>
+                    <span className={`badge ${expenseStatus}`}>{expenseStatus}</span>
                   </h3>
                   <p className="small muted">
                     {c.email} • {c.department} {c.submittedAt ? `• Submitted ${c.submittedAt}` : ''}
@@ -4560,11 +4645,11 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                     <Mini label="Expense Total" value={money(c.totals?.totalExpense)} />
                     <Mini label="VAT Total" value={money(c.totals?.totalVAT)} />
                     <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
-                    <Mini label="Status" value={c.status} />
+                    <Mini label="Status" value={expenseStatus} />
                     <Mini label="Company Approved Amount" value={money(c.approvedAmount ?? approvedExpenseAmount)} />
                   </div>
 
-                  {manager && !managerReadOnly && (
+                  {canManageExpense && (
                     <div className="flex gap items-center" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                       <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <input
@@ -4588,8 +4673,8 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                           <th>Amount</th>
                           <th>VAT</th>
                           <th>Proof</th>
-                          {manager && !managerReadOnly && <th>Approve</th>}
-                          {manager && !managerReadOnly && <th>Approved Amount</th>}
+                          {canManageExpense && <th>Approve</th>}
+                          {canManageExpense && <th>Approved Amount</th>}
                         </tr>
                       </thead>
 
@@ -4609,7 +4694,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                                 ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
                                 : 'Missing'}
                             </td>
-                            {manager && !managerReadOnly && (
+                            {canManageExpense && (
                               <td>
                                 <input
                                   type="checkbox"
@@ -4624,7 +4709,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                                 />
                               </td>
                             )}
-                            {manager && !managerReadOnly && (
+                            {canManageExpense && (
                               <td>
                                 <input
                                   className="input"
@@ -4712,9 +4797,26 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
               {manager && !managerReadOnly && (
                 <div className="space-y-sm" style={{ background: '#f8fafc', padding: 16, borderRadius: 20, marginTop: 16 }}>
                   <label className="label">Manager Note</label>
-                  <textarea className="textarea" value={c.managerNote || ''} onChange={e => updateClaim(c.id, { managerNote: e.target.value })} />
+                  <textarea
+                    className="textarea"
+                    disabled={isLockedExpense}
+                    value={c.applicationManagerNote || c.managerNote || ''}
+                    onChange={e => updateClaim(c.id, { managerNote: e.target.value })}
+                  />
 
-                  <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <div className="flex gap" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                    <div>
+                      {isLockedExpense && (
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() => setEditingLockedExpenseIds(prev => ({ ...prev, [c.id]: true }))}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                     {isExpense && (
                       <button
                         className="btn secondary"
@@ -4725,24 +4827,35 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                         Download This Application Proofs ({claimReceiptItems.length})
                       </button>
                     )}
-                    <button
-                      className="btn"
-                      onClick={() => updateClaim(c.id, {
-                        status: 'Approved',
-                        approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
-                      })}
-                    >
-                      <CheckCircle2 size={16} /> Approve
-                    </button>
-                    <button
-                      className="btn danger"
-                      onClick={() => updateClaim(c.id, {
-                        status: 'Rejected',
-                        approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
-                      })}
-                    >
-                      <XCircle size={16} /> Reject
-                    </button>
+                    {!isLockedExpense && (
+                      <>
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            updateClaim(c.id, {
+                              status: 'Approved',
+                              approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
+                            });
+                            setEditingLockedExpenseIds(prev => ({ ...prev, [c.id]: false }));
+                          }}
+                        >
+                          <CheckCircle2 size={16} /> Approve
+                        </button>
+                        <button
+                          className="btn danger"
+                          onClick={() => {
+                            updateClaim(c.id, {
+                              status: 'Rejected',
+                              approvedAmount: isExpense ? approvedExpenseAmount : c.approvedAmount
+                            });
+                            setEditingLockedExpenseIds(prev => ({ ...prev, [c.id]: false }));
+                          }}
+                        >
+                          <XCircle size={16} /> Reject
+                        </button>
+                      </>
+                    )}
+                    </div>
                   </div>
                 </div>
               )}
