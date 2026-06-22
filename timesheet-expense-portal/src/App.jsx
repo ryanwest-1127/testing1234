@@ -858,7 +858,7 @@ export default function App() {
 
   useEffect(() => {
     const defaultEmployee = activeUser.role === 'Manager' && managerDataMode === 'overall'
-      ? employees.find(e => e.role !== 'Manager') || activeUser
+      ? portalEmployees.find(e => e.role !== 'Manager') || activeUser
       : activeUser;
 
     if (activeUser.role === 'Manager') {
@@ -870,12 +870,12 @@ export default function App() {
     setEmployeeInfo({
       employeeId: defaultEmployee.id,
       employeeName: defaultEmployee.name,
-      email: defaultEmployee.email,
+      email: defaultEmployee.authEmail || defaultEmployee.email,
       notes: ''
     });
     setReviewingClaimId(null);
     setEntryHistoryView(null);
-  }, [activeUser, managerDataMode]);
+  }, [activeUser, managerDataMode, profileUsers.length]);
 
   useEffect(() => {
     if (!session || profileLoading || profileMissing) return;
@@ -959,6 +959,11 @@ export default function App() {
   );
 
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
+  const portalEmployees = profileUsers.length ? profileUsers : employees;
+  const findPortalEmployee = (employeeId) =>
+    portalEmployees.find(employee => employee.id === employeeId) ||
+    employees.find(employee => employee.id === employeeId) ||
+    activeUser;
 
   const accountClaims =
     activeUser.role === 'Manager' && managerDataMode === 'overall'
@@ -1058,12 +1063,12 @@ export default function App() {
   });
 
   const setClaimEmployee = (employeeId) => {
-    const employee = employees.find(e => e.id === employeeId) || employees[0];
+    const employee = findPortalEmployee(employeeId);
     setEmployeeInfo(prev => ({
       ...prev,
       employeeId: employee.id,
       employeeName: employee.name,
-      email: employee.email
+      email: employee.authEmail || employee.email
     }));
   };
 
@@ -1119,7 +1124,7 @@ export default function App() {
     employeeId: employeeInfo.employeeId,
     employeeName: employeeInfo.employeeName,
     email: employeeInfo.email,
-    department: employees.find(e => e.id === employeeInfo.employeeId)?.department || 'Production',
+    department: findPortalEmployee(employeeInfo.employeeId)?.department || 'Production',
     week: selectedWeek,
     weekLabel: weekLabel(selectedWeek),
     status,
@@ -1324,7 +1329,7 @@ export default function App() {
 
       const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
       const vatTotal = expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
-      const selectedEmployee = employees.find(e => e.id === employeeInfo.employeeId);
+      const selectedEmployee = findPortalEmployee(employeeInfo.employeeId);
       const inferredExpenseMonth = getClaimExpenseMonth(editingOriginalClaim) || currentMonthValue();
 
       updatedClaim = {
@@ -1346,7 +1351,7 @@ export default function App() {
     } else {
       const cleanedTimesheet = sanitizeTimesheetForSelectedWeek(timesheet, selectedWeek);
       const cleanedTotals = calculateTotals(cleanedTimesheet, expenses, timeInLieu, standardHours);
-      const selectedEmployee = employees.find(e => e.id === employeeInfo.employeeId);
+      const selectedEmployee = findPortalEmployee(employeeInfo.employeeId);
 
       updatedClaim = {
         ...editingOriginalClaim,
@@ -1879,7 +1884,7 @@ export default function App() {
                 employeeInfo,
                 setEmployeeInfo,
                 setClaimEmployee,
-                employees,
+                employees: portalEmployees,
                 activeUser,
                 personalMode: managerPersonalMode,
                 selectedWeek,
@@ -1951,7 +1956,7 @@ export default function App() {
               {...{
                 employeeInfo,
                 setClaimEmployee,
-                employees,
+                employees: portalEmployees,
                 activeUser,
                 personalMode: managerPersonalMode,
                 selectedExpenseMonth,
