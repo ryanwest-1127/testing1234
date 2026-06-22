@@ -3236,6 +3236,7 @@ function TimesheetForm(p) {
 
 
 function ExpenseForm(p) {
+  const [expenseSummaryOpen, setExpenseSummaryOpen] = useState(true);
   const currentExpenseTotal = p.expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
   const personalExpenseClaims = (p.expenseSummaryClaims || []).filter(claim => claimTypeOf(claim) === 'expense');
   const editingClaim = personalExpenseClaims.find(claim => claim.id === p.editingClaimId);
@@ -3270,59 +3271,73 @@ function ExpenseForm(p) {
     <div className="space-y">
       <div className="card">
         <div className="card-content">
-          <div>
-            <p className="small muted">Personal Expense Overview</p>
-            <h2>Expense Summary</h2>
-          </div>
-
-          <div className="grid grid-3" style={{ marginTop: 14 }}>
-            <Mini label="Claim Month" value={monthLabel(claimMonth)} />
-            <Mini label="Expense Claim Totals" value={money(currentExpenseSummaryTotal)} />
-            <Mini label="Approved / Paid" value={money(currentPaidExpenseTotal)} />
-          </div>
-
-          <div className="grid grid-2-1" style={{ marginTop: 18 }}>
+          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
             <div>
-              {personalExpenseByCategory.length === 0 ? (
-                <div className="muted" style={{ padding: 24 }}>No expense category data yet.</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={240}>
-                  <PieChart>
-                    <Pie data={personalExpenseByCategory} dataKey="value" nameKey="name" outerRadius={80} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                      {personalExpenseByCategory.map((item, index) => (
-                        <Cell key={item.name} fill={expensePieColors[index % expensePieColors.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => money(value)} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
+              <p className="small muted">Personal Expense Overview</p>
+              <h2>Expense Summary</h2>
             </div>
-
-            <div className="wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Items</th>
-                    <th>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {personalExpenseByCategory.length === 0 ? (
-                    <tr><td colSpan="3" className="muted">No expense items yet.</td></tr>
-                  ) : personalExpenseByCategory.map(item => (
-                    <tr key={item.name}>
-                      <td><b>{item.name}</b></td>
-                      <td>{item.count}</td>
-                      <td>{money(item.value)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <button
+              className="btn secondary"
+              type="button"
+              aria-expanded={expenseSummaryOpen}
+              onClick={() => setExpenseSummaryOpen(open => !open)}
+            >
+              {expenseSummaryOpen ? '-' : '+'}
+            </button>
           </div>
+
+          {expenseSummaryOpen && (
+            <>
+              <div className="grid grid-3" style={{ marginTop: 14 }}>
+                <Mini label="Claim Month" value={monthLabel(claimMonth)} />
+                <Mini label="Expense Claim Totals" value={money(currentExpenseSummaryTotal)} />
+                <Mini label="Approved / Paid" value={money(currentPaidExpenseTotal)} />
+              </div>
+
+              <div className="grid grid-2-1" style={{ marginTop: 18 }}>
+                <div>
+                  {personalExpenseByCategory.length === 0 ? (
+                    <div className="muted" style={{ padding: 24 }}>No expense category data yet.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={240}>
+                      <PieChart>
+                        <Pie data={personalExpenseByCategory} dataKey="value" nameKey="name" outerRadius={80} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                          {personalExpenseByCategory.map((item, index) => (
+                            <Cell key={item.name} fill={expensePieColors[index % expensePieColors.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value) => money(value)} />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                <div className="wide">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th>Items</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {personalExpenseByCategory.length === 0 ? (
+                        <tr><td colSpan="3" className="muted">No expense items yet.</td></tr>
+                      ) : personalExpenseByCategory.map(item => (
+                        <tr key={item.name}>
+                          <td><b>{item.name}</b></td>
+                          <td>{item.count}</td>
+                          <td>{money(item.value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
