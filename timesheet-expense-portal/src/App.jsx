@@ -3241,21 +3241,88 @@ function ExpenseForm(p) {
   const editingClaim = personalExpenseClaims.find(claim => claim.id === p.editingClaimId);
   const claimMonth = editingClaim ? getClaimExpenseMonth(editingClaim) : currentMonthValue();
   const currentMonthClaims = personalExpenseClaims.filter(claim => getClaimExpenseMonth(claim) === claimMonth);
+  const savedSummaryClaims = currentMonthClaims.filter(claim => claim.id !== p.editingClaimId);
   const savedCurrentMonthTotal = currentMonthClaims
     .filter(claim => claim.id !== p.editingClaimId)
     .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
   const currentExpenseSummaryTotal = savedCurrentMonthTotal + currentExpenseTotal;
-  const currentPaidExpenseTotal = currentMonthClaims
+  const savedPaidExpenseTotal = savedSummaryClaims
     .filter(claim => ['Approved', 'Paid'].includes(claim.status))
     .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
+  const currentPaidExpenseTotal = savedPaidExpenseTotal + (['Approved', 'Paid'].includes(editingClaim?.status) ? currentExpenseTotal : 0);
+  const personalExpenseSummaryItems = [
+    ...savedSummaryClaims.flatMap(claim => (claim.expenses || []).map(expense => ({ expense, status: claim.status }))),
+    ...(p.expenses || []).map(expense => ({ expense, status: editingClaim?.status || 'Current' }))
+  ];
+  const personalExpenseByCategory = Object.values(personalExpenseSummaryItems.reduce((groups, item) => {
+    const category = item.expense.category || 'Other';
+    const existing = groups[category] || { name: category, value: 0, count: 0 };
+    groups[category] = {
+      ...existing,
+      value: existing.value + Number(item.expense.amount || 0),
+      count: existing.count + 1
+    };
+    return groups;
+  }, {})).filter(item => item.value > 0).sort((a, b) => b.value - a.value);
+  const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#0891b2', '#f97316', '#64748b'];
 
   return (
     <div className="space-y">
       <div className="card">
-        <div className="card-content grid grid-3">
-          <Mini label="Claim Month" value={monthLabel(claimMonth)} />
-          <Mini label="Current Expense Total" value={money(currentExpenseSummaryTotal)} />
-          <Mini label="Current Paid Expense Total" value={money(currentPaidExpenseTotal)} />
+        <div className="card-content">
+          <div>
+            <p className="small muted">Personal Expense Overview</p>
+            <h2>Expense Summary</h2>
+          </div>
+
+          <div className="grid grid-3" style={{ marginTop: 14 }}>
+            <Mini label="Claim Month" value={monthLabel(claimMonth)} />
+            <Mini label="Expense Claim Totals" value={money(currentExpenseSummaryTotal)} />
+            <Mini label="Approved / Paid" value={money(currentPaidExpenseTotal)} />
+          </div>
+
+          <div className="grid grid-2-1" style={{ marginTop: 18 }}>
+            <div>
+              {personalExpenseByCategory.length === 0 ? (
+                <div className="muted" style={{ padding: 24 }}>No expense category data yet.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie data={personalExpenseByCategory} dataKey="value" nameKey="name" outerRadius={80} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                      {personalExpenseByCategory.map((item, index) => (
+                        <Cell key={item.name} fill={expensePieColors[index % expensePieColors.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => money(value)} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            <div className="wide">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Items</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {personalExpenseByCategory.length === 0 ? (
+                    <tr><td colSpan="3" className="muted">No expense items yet.</td></tr>
+                  ) : personalExpenseByCategory.map(item => (
+                    <tr key={item.name}>
+                      <td><b>{item.name}</b></td>
+                      <td>{item.count}</td>
+                      <td>{money(item.value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -4330,8 +4397,8 @@ function ManagerAdminCategory({
             </div>
 
             <div className="grid grid-4" style={{ marginTop: 14 }}>
-              <Mini label="Approved Expense Total" value={money(expenseGross)} />
-              <Mini label="Approved Claims" value={money(expenseGross)} />
+              <Mini label="Claim Month" value={expenseSummaryMonth === 'All' ? 'All Approved Months' : monthLabel(expenseSummaryMonth)} />
+              <Mini label="Expense Claim Totals" value={money(expenseGross)} />
               <Mini label="Approved / Paid" value={money(expenseApprovedPaid)} />
               <Mini label="Company VAT Total" value={money(expenseVat)} />
             </div>
