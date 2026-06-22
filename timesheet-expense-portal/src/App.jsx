@@ -408,15 +408,70 @@ function expenseClaimStatusFromItems(expenses, fallbackStatus = 'Submitted') {
   return fallbackStatus || 'Submitted';
 }
 
+function expenseItemsWithApplicationMetadata(claim) {
+  return (claim.expenses || []).map((expense) => ({
+    ...expense,
+    applicationId: expense.applicationId || claim.id,
+    applicationSubmittedAt: expense.applicationSubmittedAt || claim.submittedAt || '',
+    applicationStatus: expense.applicationStatus || claim.status || 'Submitted',
+    applicationManagerNote: expense.applicationManagerNote ?? claim.managerNote ?? ''
+  }));
+}
+
+function mergeExpenseClaimsForMonth(existingClaim, incomingClaim) {
+  const expenses = [
+    ...expenseItemsWithApplicationMetadata(existingClaim),
+    ...expenseItemsWithApplicationMetadata(incomingClaim)
+  ];
+  const totalExpense = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const totalVAT = expenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
+  const approvedAmount = expenses.reduce((sum, expense) => {
+    return sum + (expense.approvalStatus === 'rejected'
+      ? Number(expense.approvedAmount || 0)
+      : Number(expense.amount || 0));
+  }, 0);
+  const expenseMonth = getClaimExpenseMonth(existingClaim) || getClaimExpenseMonth(incomingClaim);
+
+  return {
+    ...existingClaim,
+    expenseMonth,
+    periodLabel: monthLabel(expenseMonth),
+    expenses,
+    totals: {
+      ...(existingClaim.totals || {}),
+      totalExpense,
+      totalVAT
+    },
+    approvedAmount,
+    status: expenseClaimStatusFromItems(expenses, existingClaim.status || incomingClaim.status || 'Submitted'),
+    updatedAt: incomingClaim.updatedAt || existingClaim.updatedAt
+  };
+}
+
 function uniqueClaimsByEmployeeWeekType(claims) {
   const seen = new Set();
   const result = [];
 
   (claims || []).forEach(claim => {
     const key = claimUniqueKey(claim);
-    if (seen.has(key)) return;
+    const existingIndex = result.findIndex(item => claimUniqueKey(item) === key);
+
+    if (existingIndex >= 0) {
+      if (claimTypeOf(claim) === 'expense') {
+        result[existingIndex] = mergeExpenseClaimsForMonth(result[existingIndex], claim);
+      }
+      return;
+    }
+
     seen.add(key);
-    result.push(claim);
+    result.push(claimTypeOf(claim) === 'expense'
+      ? {
+          ...claim,
+          expenseMonth: getClaimExpenseMonth(claim),
+          periodLabel: claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)),
+          expenses: expenseItemsWithApplicationMetadata(claim)
+        }
+      : claim);
   });
 
   return result;
@@ -4460,6 +4515,7 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
           claims={[claim]}
           setReceipt={setReceipt}
           manager
+          lockApprovedExpenseRows
           updateClaim={updateClaim}
         />
       ) : (
@@ -4571,7 +4627,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
   );
 }
 
-function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updateClaim, startEditClaim, activeUser }) {
+function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockApprovedExpenseRows = false, updateClaim, startEditClaim, activeUser }) {
   const [editingLockedExpenseIds, setEditingLockedExpenseIds] = useState({});
 
   if (!claims.length) {
@@ -4598,6 +4654,8 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
         const expenseStatus = isExpense ? (c.applicationStatus || c.status || 'Submitted') : c.status;
         const isLockedExpense = manager && isExpense && ['Approved', 'Paid', 'Rejected'].includes(expenseStatus) && !editingLockedExpenseIds[c.id];
         const canManageExpense = manager && isExpense && !managerReadOnly && !isLockedExpense;
+        const hasLockedExpenseRows = lockApprovedExpenseRows && expenseItems.some(expense => (expense.applicationStatus || c.status || 'Submitted') !== 'Submitted');
+        const canEditLockedRows = Boolean(editingLockedExpenseIds[c.id]);
         const expenseDecisionAmount = (expense) =>
           expense.approvalStatus === 'rejected'
             ? Number(expense.approvedAmount || 0)
@@ -4618,8 +4676,12 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
         const setAllExpenseItemsApproved = (approved) => {
           updateExpenseItems(expense => ({
             ...expense,
-            approvalStatus: approved ? 'approved' : 'rejected',
-            approvedAmount: approved ? Number(expense.amount || 0) : (expense.approvedAmount || '')
+            ...(!lockApprovedExpenseRows || (expense.applicationStatus || c.status || 'Submitted') === 'Submitted' || canEditLockedRows
+              ? {
+                  approvalStatus: approved ? 'approved' : 'rejected',
+                  approvedAmount: approved ? Number(expense.amount || 0) : (expense.approvedAmount || '')
+                }
+              : {})
           }));
         };
 
@@ -4689,6 +4751,8 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                       <tbody>
                         {expenseItems.map(e => {
                           const isItemApproved = e.approvalStatus !== 'rejected';
+                          const expenseRowStatus = e.applicationStatus || c.status || 'Submitted';
+                          const canEditExpenseRow = canManageExpense && (!lockApprovedExpenseRows || expenseRowStatus === 'Submitted' || canEditLockedRows);
                           return (
                           <tr key={e.id}>
                             <td>{e.date || '—'}</td>
@@ -4698,7 +4762,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                             <td><b>{money(e.amount)}</b></td>
                             <td><b>{money(e.vat)}</b></td>
                             {manager && isExpense && (
-                              <td><span className={`badge ${e.applicationStatus || c.status || 'Submitted'}`}>{e.applicationStatus || c.status || 'Submitted'}</span></td>
+                              <td><span className={`badge ${expenseRowStatus}`}>{expenseRowStatus}</span></td>
                             )}
                             <td>
                               {e.receiptName
@@ -4709,6 +4773,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                               <td>
                                 <input
                                   type="checkbox"
+                                  disabled={!canEditExpenseRow}
                                   checked={isItemApproved}
                                   onChange={event => updateExpenseItems(expense => expense.id === e.id
                                     ? {
@@ -4727,7 +4792,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                                   type="number"
                                   min="0"
                                   step="0.01"
-                                  disabled={isItemApproved}
+                                  disabled={isItemApproved || !canEditExpenseRow}
                                   value={isItemApproved ? Number(e.amount || 0) : (e.approvedAmount || '')}
                                   onChange={event => updateExpenseItems(expense => expense.id === e.id
                                     ? { ...expense, approvalStatus: 'rejected', approvedAmount: event.target.value }
@@ -4818,6 +4883,15 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, updat
                   <div className="flex gap" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
                     <div>
                       {isLockedExpense && (
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() => setEditingLockedExpenseIds(prev => ({ ...prev, [c.id]: true }))}
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {!isLockedExpense && hasLockedExpenseRows && !canEditLockedRows && (
                         <button
                           className="btn secondary"
                           type="button"
