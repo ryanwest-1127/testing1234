@@ -666,9 +666,37 @@ function userForSession(session) {
     fallbackEmployeeFromSession(session);
 }
 
+function userFromProfile(profile, session) {
+  if (!profile) return userForSession(session);
+
+  const profileRole = normalizeEmail(profile.role) === 'manager' ? 'Manager' : 'Employee';
+  const matchedDemoEmployee = employees.find(employee =>
+    normalizeEmail(employee.authEmail || employee.email) === normalizeEmail(profile.email)
+  );
+
+  return {
+    ...(matchedDemoEmployee || {}),
+    id: profile.id,
+    name: profile.full_name || matchedDemoEmployee?.name || fallbackEmployeeFromSession(session).name,
+    email: profile.email || session?.user?.email || matchedDemoEmployee?.email || '',
+    authEmail: profile.email || session?.user?.email || '',
+    role: profileRole,
+    department: profile.department || matchedDemoEmployee?.department || 'Production',
+    startDate: profile.start_date || '',
+    weeklyHours: profile.weekly_hours || 37.5,
+    dailyHours: profile.daily_hours || 7.5,
+    annualLeaveAllowance: profile.annual_leave_allowance || 28,
+    active: profile.active !== false
+  };
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profile, setProfile] = useState(null);
+  const [profileError, setProfileError] = useState('');
+  const [profileMissing, setProfileMissing] = useState(false);
   const [tab, setTab] = useState('dashboard');
   const [entryHistoryView, setEntryHistoryView] = useState(null);
   const [activeUser, setActiveUser] = useState(employees[0]);
@@ -736,14 +764,61 @@ export default function App() {
   }, [claims, leaveRequests]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session) {
+      setProfile(null);
+      setProfileMissing(false);
+      setProfileError('');
+      setProfileLoading(false);
+      return;
+    }
 
-    const sessionUser = userForSession(session);
-    setActiveUser(sessionUser);
-    setManagerDataMode(sessionUser.role === 'Manager' ? 'overall' : 'personal');
-    setTab('dashboard');
-    setEntryHistoryView(null);
-    setReviewingClaimId(null);
+    let cancelled = false;
+
+    const loadProfile = async () => {
+      setProfileLoading(true);
+      setProfileError('');
+      setProfileMissing(false);
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id,email,full_name,role,department,start_date,weekly_hours,daily_hours,annual_leave_allowance,active')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        const fallbackUser = userForSession(session);
+        setProfile(null);
+        setProfileMissing(false);
+        setProfileError(error.message);
+        setActiveUser(fallbackUser);
+        setManagerDataMode(fallbackUser.role === 'Manager' ? 'overall' : 'personal');
+      } else if (!data) {
+        const fallbackUser = userForSession(session);
+        setProfile(null);
+        setProfileMissing(true);
+        setActiveUser(fallbackUser);
+        setManagerDataMode(fallbackUser.role === 'Manager' ? 'overall' : 'personal');
+      } else {
+        const profileUser = userFromProfile(data, session);
+        setProfile(data);
+        setProfileMissing(false);
+        setActiveUser(profileUser);
+        setManagerDataMode(profileUser.role === 'Manager' ? 'overall' : 'personal');
+      }
+
+      setTab('dashboard');
+      setEntryHistoryView(null);
+      setReviewingClaimId(null);
+      setProfileLoading(false);
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
   }, [session?.user?.id, session?.user?.email]);
 
   useEffect(() => {
@@ -1382,6 +1457,27 @@ export default function App() {
     return <LoginScreen />;
   }
 
+  if (profileLoading) {
+    return (
+      <div className="bg-gradient min-h-screen">
+        <div className="container">
+          <div className="card">
+            <div className="card-content muted">Loading account profile...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (profileMissing) {
+    return (
+      <ProfileSetupNotice
+        email={session.user?.email}
+        signOut={signOut}
+      />
+    );
+  }
+
 
   return (
     <div className="bg-gradient min-h-screen">
@@ -1437,7 +1533,9 @@ export default function App() {
 
               <div>
                 <p className="label" style={{ color: '#cbd5e1' }}>Portal role</p>
-                <p className="small" style={{ color: '#e2e8f0', marginTop: 8 }}>{activeUser.role}</p>
+                <p className="small" style={{ color: '#e2e8f0', marginTop: 8 }}>
+                  {activeUser.role}{profile ? ' via profile' : ' fallback'}
+                </p>
               </div>
 
               <button className="btn secondary" type="button" onClick={signOut}>
@@ -1446,6 +1544,14 @@ export default function App() {
             </div>
           </div>
         </motion.header>
+
+        {profileError && (
+          <div className="card">
+            <div className="card-content small muted">
+              Profile lookup warning: {profileError}. Temporary email fallback is being used.
+            </div>
+          </div>
+        )}
 
         {activeUser.role === 'Manager' && managerDataMode === 'personal' && (
           <div className="card">
@@ -1963,6 +2069,37 @@ function LoginScreen() {
               Accounts are created by the company admin. Public sign-up is disabled in this app.
             </p>
           </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+function ProfileSetupNotice({ email, signOut }) {
+  return (
+    <div className="bg-gradient min-h-screen">
+      <div className="container">
+        <div className="card" style={{ maxWidth: 620, margin: '48px auto' }}>
+          <div className="card-content space-y-sm">
+            <div>
+              <p className="small muted">Account Profile Required</p>
+              <h1 className="title" style={{ color: '#0f172a' }}>Profile not set up</h1>
+              <p className="small muted">
+                You are signed in as {email}, but this account does not have a portal profile yet.
+              </p>
+            </div>
+
+            <div className="small muted" style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
+              Ask the manager/admin to add this user to the Supabase profiles table.
+              For the first manager account, run the SQL file at supabase/profiles.sql in Supabase SQL Editor.
+            </div>
+
+            <button className="btn secondary" type="button" onClick={signOut}>
+              Logout
+            </button>
+          </div>
         </div>
       </div>
     </div>
