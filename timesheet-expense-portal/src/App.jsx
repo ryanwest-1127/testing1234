@@ -783,8 +783,8 @@ export default function App() {
   const visibleTabs = activeUser.role === 'Manager'
     ? managerDataMode === 'overall'
       ? []
-      : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history']
-    : ['dashboard', 'timesheet', 'expense', 'annualLeave', 'history'];
+      : ['dashboard', 'timesheet', 'expense', 'annualLeave']
+    : ['dashboard', 'timesheet', 'expense', 'annualLeave'];
 
   const switchManagerDataMode = (mode) => {
     setManagerDataMode(mode);
@@ -1076,7 +1076,7 @@ export default function App() {
     setTimesheet(defaultTimesheet());
     setExpenses([makeExpense()]);
     setTimeInLieu({ used: '0', earned: '0' });
-    setTab('history');
+    setTab(updatedType === 'expense' ? 'expense' : 'timesheet');
   };
 
   const cancelEditClaim = () => {
@@ -1505,7 +1505,10 @@ export default function App() {
                 editingClaimId,
                 saveEditedClaim,
                 cancelEditClaim,
-                setTab
+                setTab,
+                historyClaims: filteredClaims.filter(claim => claimTypeOf(claim) === 'timesheet'),
+                startEditClaim,
+                setReceipt
               }}
             />
           )
@@ -1560,7 +1563,9 @@ export default function App() {
                 expenseError,
                 editingClaimId,
                 saveEditedClaim,
-                cancelEditClaim
+                cancelEditClaim,
+                historyClaims: filteredClaims.filter(claim => claimTypeOf(claim) === 'expense'),
+                startEditClaim
               }}
             />
           )
@@ -1725,13 +1730,6 @@ export default function App() {
             </div>
           </div>
           )
-        )}
-
-        {tab === 'history' && (
-          <>
-            <Filter {...{ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
-            <ClaimList claims={filteredClaims} setReceipt={setReceipt} startEditClaim={startEditClaim} activeUser={activeUser} />
-          </>
         )}
 
         {tab === 'manager' && (
@@ -3192,6 +3190,30 @@ function TimesheetForm(p) {
           )}
         </div>
       </div>
+
+      <HistorySection
+        title="Timesheet History"
+        claims={p.historyClaims || []}
+        setReceipt={p.setReceipt}
+        startEditClaim={p.startEditClaim}
+      />
+
+      <div className="small muted space-y-sm">
+        <p><b>Timesheet rules</b></p>
+        <p>Standard working day is 7.5hrs + a 30 minute break.</p>
+        <p>If you start at 9am you finish at 5pm.</p>
+        <p>If you start at 9:30am you finish at 5:30pm etc.</p>
+        <p>If you work half a day so 4hours or under you are not entitled to a break.</p>
+        <p><b>Working at a computer health and safety:</b></p>
+        <p>Frequency: Aim for a 5-10 minute break after every 50-60 minutes of continuous screen time.</p>
+        <p>Activity: Use breaks to move away from the screen, stretch, walk around, or do other non-screen tasks like making coffee or chatting or toilet break.</p>
+        <p>Eye Care (20-20-20 Rule): Every 20 minutes, look at something 20 feet away for 20 seconds to relax eye muscles.</p>
+        <p>Lieu is classed as additional hours outside your standard working day.</p>
+        <p>You should count travel as anything that is outside the normal scope of your day to day, which I think is 30minutes for everyone travelling from home, to and from Salford Innovation Forum.</p>
+        <p>For clarity if you are travelling and staying overnight in a hotel, once you arrive at the hotel your lieu time stops and once you arrive at the job your time continues. However if the time travelling to the job in the morning is beyond half hour then you can add on time.</p>
+        <p>Anyone who works a weekend can switch the day off for a weekday the following week or be paid/ reimbursed time at 1.2 pay ratio.</p>
+        <p>Lieu must be taken back within a month or loose it, unless other arrangement agreed with Sara.</p>
+      </div>
     </div>
   );
 }
@@ -3245,10 +3267,7 @@ function ExpenseForm(p) {
             <div className="grid expense-row" key={e.id}>
               <input className="input" type="date" value={e.date} onChange={ev => p.updateExpense(i, 'date', ev.target.value)} />
 
-              <div className="space-y-sm">
-                <input className="input" placeholder="PJ name" value={e.projectName || ''} onChange={ev => p.updateExpense(i, 'projectName', ev.target.value)} />
-                <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
-              </div>
+              <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
 
               <select className="select" value={e.category} onChange={ev => p.updateExpense(i, 'category', ev.target.value)}>
                 {categories.map(c => <option key={c}>{c}</option>)}
@@ -3357,6 +3376,13 @@ function ExpenseForm(p) {
         </div>
       </div>
 
+      <HistorySection
+        title="Expense History"
+        claims={p.historyClaims || []}
+        setReceipt={p.setReceipt}
+        startEditClaim={p.startEditClaim}
+      />
+
       <div className="small muted space-y-sm">
         <p><b>Claim expense rules</b></p>
         <p>Expenses should always have a receipt with VAT on.</p>
@@ -3459,6 +3485,22 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
           <RefreshCw size={16} /> Clear demo data
         </button>
       </div>
+    </div>
+  );
+}
+
+function HistorySection({ title, claims, setReceipt, startEditClaim }) {
+  return (
+    <div className="space-y-sm">
+      <div>
+        <p className="small muted">History</p>
+        <h2>{title}</h2>
+      </div>
+      <ClaimList
+        claims={claims || []}
+        setReceipt={setReceipt}
+        startEditClaim={startEditClaim}
+      />
     </div>
   );
 }
