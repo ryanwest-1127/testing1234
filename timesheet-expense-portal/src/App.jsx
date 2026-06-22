@@ -650,8 +650,15 @@ function fallbackEmployeeFromSession(session) {
 
 function userForSession(session) {
   const email = normalizeEmail(session?.user?.email);
+  const metadataRole = normalizeEmail(session?.user?.user_metadata?.role || session?.user?.app_metadata?.role);
+  const [emailName, emailDomain] = email.split('@');
 
-  if (managerAuthEmails.has(email)) {
+  if (
+    managerAuthEmails.has(email) ||
+    metadataRole === 'manager' ||
+    metadataRole === 'boss' ||
+    (emailName === 'ryan' && emailDomain === 'sazmedia.co.uk')
+  ) {
     return employees.find(employee => employee.role === 'Manager') || employees[0];
   }
 
@@ -1426,6 +1433,11 @@ export default function App() {
               <div>
                 <p className="label" style={{ color: '#cbd5e1' }}>Signed in</p>
                 <p className="small" style={{ color: '#e2e8f0', marginTop: 8 }}>{session.user?.email}</p>
+              </div>
+
+              <div>
+                <p className="label" style={{ color: '#cbd5e1' }}>Portal role</p>
+                <p className="small" style={{ color: '#e2e8f0', marginTop: 8 }}>{activeUser.role}</p>
               </div>
 
               <button className="btn secondary" type="button" onClick={signOut}>
