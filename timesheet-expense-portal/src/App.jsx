@@ -1796,6 +1796,8 @@ function Dashboard({
   setHighlightedLeaveId
 }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
+  const [dashboardExpensePeriodType, setDashboardExpensePeriodType] = useState('month');
+  const [dashboardExpensePeriod, setDashboardExpensePeriod] = useState('');
   const isManager = activeUser?.role === 'Manager';
   const isManagerPersonalDashboard = isManager && managerDataMode === 'personal';
   const isManagerOverallDashboard = isManager && managerDataMode === 'overall';
@@ -1879,24 +1881,46 @@ function Dashboard({
     ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || [])
         .filter(claim => employeeIds.has(claim.employeeId) && claimTypeOf(claim) === 'expense')
     : [];
-  const companyExpenseGross = companyExpenseClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
-  const companyExpenseApprovedPaid = companyExpenseClaims
-    .filter(claim => ['Approved', 'Paid'].includes(claim.status))
-    .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
-  const companyExpenseTotal = Math.max(0, companyExpenseGross - companyExpenseApprovedPaid);
-  const companyVATTotal = companyExpenseClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalVAT || 0), 0);
+  const companyExpenseItems = companyExpenseClaims.flatMap(claim => (claim.expenses || []).map(expense => ({
+    claim,
+    expense,
+    status: expense.applicationStatus || claim.status || 'Submitted',
+    month: getClaimExpenseMonth(claim)
+  })));
+  const dashboardExpenseMonthOptions = Array.from(new Set(companyExpenseItems.map(item => item.month).filter(Boolean))).sort().reverse();
+  const dashboardExpenseYearOptions = Array.from(new Set(dashboardExpenseMonthOptions.map(month => String(month).slice(0, 4)).filter(Boolean))).sort().reverse();
+  const dashboardExpensePeriodOptions = dashboardExpensePeriodType === 'year' ? dashboardExpenseYearOptions : dashboardExpenseMonthOptions;
+  const selectedDashboardExpensePeriod = dashboardExpensePeriodOptions.includes(dashboardExpensePeriod)
+    ? dashboardExpensePeriod
+    : dashboardExpensePeriodOptions[0] || '';
+  const approvedCompanyExpenseItems = companyExpenseItems
+    .filter(item => ['Approved', 'Paid'].includes(item.status))
+    .filter(item => {
+      if (!selectedDashboardExpensePeriod) return false;
+      return dashboardExpensePeriodType === 'year'
+        ? String(item.month || '').startsWith(selectedDashboardExpensePeriod)
+        : item.month === selectedDashboardExpensePeriod;
+    });
+  const companyExpenseGross = approvedCompanyExpenseItems.reduce((sum, item) => {
+    return sum + (item.expense.approvalStatus === 'rejected'
+      ? Number(item.expense.approvedAmount || 0)
+      : Number(item.expense.amount || 0));
+  }, 0);
+  const companyExpenseApprovedPaid = companyExpenseGross;
+  const companyVATTotal = approvedCompanyExpenseItems.reduce((sum, item) => sum + Number(item.expense.vat || 0), 0);
   const companyExpenseByCategory = Object.values(
-    companyExpenseClaims.reduce((groups, claim) => {
-      (claim.expenses || []).forEach(expense => {
-        const category = expense.category || 'Other';
-        const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
-        groups[category] = {
-          ...existing,
-          value: existing.value + Number(expense.amount || 0),
-          vat: existing.vat + Number(expense.vat || 0),
-          count: existing.count + 1
-        };
-      });
+    approvedCompanyExpenseItems.reduce((groups, item) => {
+      const category = item.expense.category || 'Other';
+      const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
+      const approvedValue = item.expense.approvalStatus === 'rejected'
+        ? Number(item.expense.approvedAmount || 0)
+        : Number(item.expense.amount || 0);
+      groups[category] = {
+        ...existing,
+        value: existing.value + approvedValue,
+        vat: existing.vat + Number(item.expense.vat || 0),
+        count: existing.count + 1
+      };
       return groups;
     }, {})
   ).sort((a, b) => b.value - a.value);
@@ -2250,13 +2274,50 @@ function Dashboard({
               <div>
                 <p className="small muted">Company Expense Overview</p>
                 <h2>Expense Overall Summary</h2>
-                <p className="small muted">Company expense by category, built from all employee expense items.</p>
+                <p className="small muted">Company approved and paid expense by selected month or year.</p>
+              </div>
+              <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+                <select
+                  className="select"
+                  value={dashboardExpensePeriodType}
+                  onChange={event => {
+                    setDashboardExpensePeriodType(event.target.value);
+                    setDashboardExpensePeriod('');
+                  }}
+                  style={{ width: 150 }}
+                >
+                  <option value="month">By Month</option>
+                  <option value="year">By Year</option>
+                </select>
+                <select
+                  className="select"
+                  value={selectedDashboardExpensePeriod}
+                  onChange={event => setDashboardExpensePeriod(event.target.value)}
+                  style={{ width: 200 }}
+                >
+                  {dashboardExpensePeriodType === 'year'
+                    ? dashboardExpensePeriodOptions.length
+                      ? dashboardExpenseYearOptions.map(year => (
+                      <option key={year} value={year}>{year}</option>
+                    ))
+                      : <option value="">No expense years</option>
+                    : dashboardExpensePeriodOptions.length
+                      ? dashboardExpenseMonthOptions.map(month => (
+                      <option key={month} value={month}>{monthLabel(month)}</option>
+                    ))
+                      : <option value="">No expense months</option>}
+                </select>
               </div>
             </div>
 
             <div className="grid grid-4" style={{ marginTop: 14 }}>
-              <Mini label="Company Expense Total" value={money(companyExpenseTotal)} />
-              <Mini label="All Expense Claims" value={money(companyExpenseGross)} />
+              <Mini
+                label={dashboardExpensePeriodType === 'year' ? 'Claim Year' : 'Claim Month'}
+                value={dashboardExpensePeriodType === 'year'
+                  ? selectedDashboardExpensePeriod || 'No expense data'
+                  : selectedDashboardExpensePeriod ? monthLabel(selectedDashboardExpensePeriod) : 'No expense data'}
+              />
+              <Mini label="Expense Claim Totals" value={money(companyExpenseGross)} />
               <Mini label="Approved / Paid" value={money(companyExpenseApprovedPaid)} />
               <Mini label="Company VAT Total" value={money(companyVATTotal)} />
             </div>
