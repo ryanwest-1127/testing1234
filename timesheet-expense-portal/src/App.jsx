@@ -1852,6 +1852,7 @@ export default function App() {
               note="Review and approve employee timesheet applications."
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet')}
               employees={employees}
+              profileUsers={profileUsers}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => setTab('dashboard')}
@@ -1923,6 +1924,7 @@ export default function App() {
               note="Review expense claims and download all uploaded receipt proof."
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'expense')}
               employees={employees}
+              profileUsers={profileUsers}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => setTab('dashboard')}
@@ -5062,6 +5064,7 @@ function ManagerAdminCategory({
   note,
   claims,
   employees,
+  profileUsers = [],
   setReceipt,
   updateClaim,
   closeAdmin,
@@ -5150,7 +5153,25 @@ function ManagerAdminCategory({
     return haystack.includes(searchText.toLowerCase());
   };
   const visibleClaims = claims.filter(matchesSearch);
-  const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
+  const employeeDirectory = (profileUsers.length ? profileUsers : employees)
+    .filter(employee => employee.role !== 'Manager');
+  const claimOnlyEmployees = claims
+    .filter(claim => claim.employeeId && !employeeDirectory.some(employee => employee.id === claim.employeeId))
+    .map(claim => ({
+      id: claim.employeeId,
+      name: claim.employeeName || claim.email || 'Unknown Employee',
+      email: claim.email || '',
+      department: claim.department || 'Production',
+      role: 'Employee'
+    }));
+  const employeeDirectoryWithClaims = [
+    ...employeeDirectory,
+    ...Object.values(claimOnlyEmployees.reduce((groups, employee) => {
+      groups[employee.id] = employee;
+      return groups;
+    }, {}))
+  ];
+  const selectedEmployee = employeeDirectoryWithClaims.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeClaims = selectedEmployeeId
     ? (isExpenseAdmin ? visibleClaims : claims.filter(matchesSearch))
         .filter(claim => claim.employeeId === selectedEmployeeId)
@@ -5161,8 +5182,7 @@ function ManagerAdminCategory({
   const selectedEmployeeSelectedClaim = selectedEmployeeClaims.find(claim => claim.id === selectedClaimId) ||
     (isExpenseAdmin ? selectedEmployeeClaims[0] : nearestCurrentOrPastWeekClaim(selectedEmployeeClaims)) ||
     null;
-  const employeeRows = employees
-    .filter(employee => employee.role !== 'Manager')
+  const employeeRows = employeeDirectoryWithClaims
     .map(employee => {
       const employeeClaims = claims.filter(claim => claim.employeeId === employee.id);
       const pending = employeeClaims.filter(claim => claim.status === 'Submitted').length;
