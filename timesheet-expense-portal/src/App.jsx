@@ -730,6 +730,7 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [profileError, setProfileError] = useState('');
   const [profileMissing, setProfileMissing] = useState(false);
+  const [profileUsers, setProfileUsers] = useState([]);
   const [timesheetSyncStatus, setTimesheetSyncStatus] = useState('');
   const [tab, setTab] = useState('dashboard');
   const [entryHistoryView, setEntryHistoryView] = useState(null);
@@ -907,6 +908,35 @@ export default function App() {
     };
 
     loadTimesheets();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
+
+  useEffect(() => {
+    if (!session || profileLoading || profileMissing) return;
+
+    let cancelled = false;
+
+    const loadProfileUsers = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id,email,full_name,role,department,start_date,weekly_hours,daily_hours,annual_leave_allowance,active')
+        .eq('active', true)
+        .order('full_name', { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        setProfileUsers([]);
+        return;
+      }
+
+      setProfileUsers((data || []).map(row => userFromProfile(row, session)));
+    };
+
+    loadProfileUsers();
 
     return () => {
       cancelled = true;
@@ -1788,6 +1818,7 @@ export default function App() {
             allEmployeeClaims={accountClaims}
             allLeaveRequests={accountLeaveRequests}
             employees={employees}
+            profileUsers={profileUsers}
             viewEmployeeId={viewEmployeeId}
             setViewEmployeeId={setViewEmployeeId}
             updateClaim={updateClaim}
@@ -2488,6 +2519,7 @@ function Dashboard({
   allEmployeeClaims,
   allLeaveRequests,
   employees,
+  profileUsers = [],
   viewEmployeeId,
   setViewEmployeeId,
   updateClaim,
@@ -2563,7 +2595,9 @@ function Dashboard({
     }
   ];
 
-  const employeeIds = new Set(employees.filter(employee => employee.role !== 'Manager').map(employee => employee.id));
+  const employeeDirectory = (profileUsers.length ? profileUsers : employees)
+    .filter(employee => employee.role !== 'Manager');
+  const employeeIds = new Set(employeeDirectory.map(employee => employee.id));
   const managerPersonalSummary = isManager
     ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests)
     : null;
@@ -2635,8 +2669,7 @@ function Dashboard({
   const companyReceiptItems = receiptDownloadItemsFromClaims(companyExpenseClaims);
 
   const bossEmployeeSummaries = isManager
-    ? employees
-        .filter(employee => employee.role !== 'Manager')
+    ? employeeDirectory
         .map(employee => {
           const employeeClaims = (allEmployeeClaims || []).filter(claim => claim.employeeId === employee.id);
           const employeeLeaveRequests = (allLeaveRequests || []).filter(request => request.employeeId === employee.id);
