@@ -3488,6 +3488,8 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
 function HistorySection({ title, claims, setReceipt, startEditClaim }) {
   const [open, setOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
+  const [historyViewMode, setHistoryViewMode] = useState('month');
+  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
   const filteredHistoryClaims = (claims || []).filter(claim => {
     const haystack = [
       claim.employeeName,
@@ -3503,6 +3505,28 @@ function HistorySection({ title, claims, setReceipt, startEditClaim }) {
 
     return haystack.includes(historySearch.toLowerCase());
   });
+  const isExpenseHistory = filteredHistoryClaims.some(claim => claimTypeOf(claim) === 'expense');
+  const applicationHistoryClaims = isExpenseHistory
+    ? filteredHistoryClaims.flatMap(claim => expenseApplicationClaimsFromMonthlyClaim(claim))
+    : [];
+  const displayHistoryClaims = isExpenseHistory && historyViewMode === 'application'
+    ? applicationHistoryClaims
+    : filteredHistoryClaims;
+  const selectedHistoryClaim = displayHistoryClaims[selectedHistoryIndex] || null;
+  const canMoveHistoryPrevious = selectedHistoryIndex > 0;
+  const canMoveHistoryNext = selectedHistoryIndex < displayHistoryClaims.length - 1;
+
+  useEffect(() => {
+    setSelectedHistoryIndex(0);
+  }, [historySearch, historyViewMode, open]);
+
+  const editHistoryClaim = (claim) => {
+    if (!startEditClaim || !claim) return;
+    const parentClaim = claim.parentClaimId
+      ? filteredHistoryClaims.find(item => item.id === claim.parentClaimId)
+      : claim;
+    startEditClaim(parentClaim || claim);
+  };
 
   return (
     <div className="space-y-sm">
@@ -3512,21 +3536,63 @@ function HistorySection({ title, claims, setReceipt, startEditClaim }) {
 
       {open && (
         <>
-          <div className="flex items-center gap" style={{ maxWidth: 520 }}>
-            <Search size={16} />
-            <input
-              className="input"
-              placeholder={`Search ${title.toLowerCase()}...`}
-              value={historySearch}
-              onChange={event => setHistorySearch(event.target.value)}
-            />
+          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <div className="flex items-center gap" style={{ maxWidth: 520, flex: 1 }}>
+              <Search size={16} />
+              <input
+                className="input"
+                placeholder={`Search ${title.toLowerCase()}...`}
+                value={historySearch}
+                onChange={event => setHistorySearch(event.target.value)}
+              />
+            </div>
+
+            {isExpenseHistory && (
+              <div className="detail-view-switch" aria-label={`${title} view mode`}>
+                <button
+                  className={historyViewMode === 'month' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setHistoryViewMode('month')}
+                >
+                  By Month
+                </button>
+                <button
+                  className={historyViewMode === 'application' ? 'active' : ''}
+                  type="button"
+                  onClick={() => setHistoryViewMode('application')}
+                >
+                  By Application
+                </button>
+              </div>
+            )}
           </div>
 
-          <ClaimList
-            claims={filteredHistoryClaims}
-            setReceipt={setReceipt}
-            startEditClaim={startEditClaim}
-          />
+          <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <div className="request-stepper">
+              <button className="btn secondary" type="button" disabled={!canMoveHistoryPrevious} onClick={() => setSelectedHistoryIndex(index => Math.max(0, index - 1))}>{'<'}</button>
+              <span className="request-stepper-count">{displayHistoryClaims.length ? `${selectedHistoryIndex + 1} / ${displayHistoryClaims.length}` : '0 / 0'}</span>
+              <button className="btn secondary" type="button" disabled={!canMoveHistoryNext} onClick={() => setSelectedHistoryIndex(index => Math.min(displayHistoryClaims.length - 1, index + 1))}>{'>'}</button>
+            </div>
+            {selectedHistoryClaim && (
+              <span className="small muted">
+                {claimTypeOf(selectedHistoryClaim) === 'expense'
+                  ? selectedHistoryClaim.periodLabel || monthLabel(getClaimExpenseMonth(selectedHistoryClaim))
+                  : selectedHistoryClaim.weekLabel || selectedHistoryClaim.week}
+              </span>
+            )}
+          </div>
+
+          {selectedHistoryClaim ? (
+            <ClaimList
+              claims={[selectedHistoryClaim]}
+              setReceipt={setReceipt}
+              startEditClaim={editHistoryClaim}
+            />
+          ) : (
+            <div className="card">
+              <div className="card-content muted">No history records match this search.</div>
+            </div>
+          )}
         </>
       )}
     </div>
