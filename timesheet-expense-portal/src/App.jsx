@@ -690,6 +690,39 @@ function userFromProfile(profile, session) {
   };
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+function timesheetRowToClaim(row) {
+  const claim = row.claim || {};
+
+  return {
+    ...claim,
+    id: row.id,
+    type: 'timesheet',
+    employeeId: row.employee_id,
+    week: row.week,
+    status: row.status || claim.status || 'Draft',
+    syncedAt: row.updated_at
+  };
+}
+
+function timesheetClaimToRow(claim) {
+  return {
+    id: claim.id,
+    employee_id: claim.employeeId,
+    week: claim.week,
+    status: claim.status || 'Draft',
+    claim: {
+      ...claim,
+      type: 'timesheet',
+      employeeId: claim.employeeId
+    },
+    updated_at: new Date().toISOString()
+  };
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -697,6 +730,7 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [profileError, setProfileError] = useState('');
   const [profileMissing, setProfileMissing] = useState(false);
+  const [timesheetSyncStatus, setTimesheetSyncStatus] = useState('');
   const [tab, setTab] = useState('dashboard');
   const [entryHistoryView, setEntryHistoryView] = useState(null);
   const [activeUser, setActiveUser] = useState(employees[0]);
@@ -841,6 +875,43 @@ export default function App() {
     setReviewingClaimId(null);
     setEntryHistoryView(null);
   }, [activeUser, managerDataMode]);
+
+  useEffect(() => {
+    if (!session || profileLoading || profileMissing) return;
+
+    let cancelled = false;
+
+    const loadTimesheets = async () => {
+      setTimesheetSyncStatus('Loading timesheets from Supabase...');
+
+      const { data, error } = await supabase
+        .from('timesheet_claims')
+        .select('id,employee_id,week,status,claim,updated_at')
+        .order('week', { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        setTimesheetSyncStatus(`Timesheet sync warning: ${error.message}`);
+        return;
+      }
+
+      const remoteTimesheets = (data || []).map(timesheetRowToClaim);
+      setClaims(prev => {
+        const localNonTimesheets = prev.filter(claim => claimTypeOf(claim) !== 'timesheet');
+        return uniqueClaimsByEmployeeWeekType([...remoteTimesheets, ...localNonTimesheets]);
+      });
+      setTimesheetSyncStatus(remoteTimesheets.length
+        ? `Loaded ${remoteTimesheets.length} timesheet record(s) from Supabase.`
+        : 'Timesheets are ready in Supabase.');
+    };
+
+    loadTimesheets();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
 
   const totals = useMemo(
   () => calculateTotals(timesheet, expenses, timeInLieu, standardHours),
@@ -1050,6 +1121,56 @@ export default function App() {
     };
   };
 
+  const saveTimesheetClaimToSupabase = async (claim) => {
+    if (claimTypeOf(claim) !== 'timesheet') return { data: null, error: null };
+
+    if (!isUuid(claim.employeeId)) {
+      const message = 'Timesheet sync skipped because this account is not linked to a Supabase profile id yet.';
+      setTimesheetSyncStatus(message);
+      return { data: null, error: { message } };
+    }
+
+    const row = timesheetClaimToRow(claim);
+
+    const { error: deleteConflictError } = await supabase
+      .from('timesheet_claims')
+      .delete()
+      .eq('employee_id', claim.employeeId)
+      .eq('week', claim.week)
+      .neq('id', claim.id);
+
+    if (deleteConflictError) {
+      setTimesheetSyncStatus(`Timesheet sync warning: ${deleteConflictError.message}`);
+      return { data: null, error: deleteConflictError };
+    }
+
+    const { data, error } = await supabase
+      .from('timesheet_claims')
+      .upsert(row, { onConflict: 'id' })
+      .select('id,employee_id,week,status,claim,updated_at')
+      .single();
+
+    if (error) {
+      setTimesheetSyncStatus(`Timesheet sync warning: ${error.message}`);
+      return { data: null, error };
+    }
+
+    setTimesheetSyncStatus('Timesheet saved to Supabase.');
+    return { data: timesheetRowToClaim(data), error: null };
+  };
+
+  const patchTimesheetClaimInSupabase = async (claim, patch) => {
+    if (!claim || claimTypeOf(claim) !== 'timesheet') return;
+
+    const updatedClaim = {
+      ...claim,
+      ...patch,
+      updatedAt: new Date().toLocaleString('en-GB')
+    };
+
+    await saveTimesheetClaimToSupabase(updatedClaim);
+  };
+
   const buildExpenseClaim = status => {
     const baseClaim = commonClaimFields(status);
     const applicationSubmittedAt = baseClaim.submittedAt || new Date().toLocaleString('en-GB');
@@ -1071,12 +1192,18 @@ export default function App() {
     };
   };
 
-  const saveDraft = () => {
-    upsertClaim(buildTimesheetClaim('Draft'));
+  const saveDraft = async () => {
+    const newClaim = buildTimesheetClaim('Draft');
+    const { nextClaims, savedClaim } = upsertClaimInList(claims, newClaim);
+    setClaims(nextClaims);
+    await saveTimesheetClaimToSupabase(savedClaim);
   };
 
-  const submitTimesheet = () => {
-    upsertClaim(buildTimesheetClaim('Submitted'));
+  const submitTimesheet = async () => {
+    const newClaim = buildTimesheetClaim('Submitted');
+    const { nextClaims, savedClaim } = upsertClaimInList(claims, newClaim);
+    setClaims(nextClaims);
+    await saveTimesheetClaimToSupabase(savedClaim);
     setTimeInLieu({ used: '0' });
     setTimesheet(defaultTimesheet());
     setEmployeeInfo(p => ({ ...p, notes: '' }));
@@ -1103,7 +1230,12 @@ export default function App() {
   };
 
   const updateClaim = (id, patch) => {
+    const existingClaim = claims.find(claim => claim.id === id);
     setClaims(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+
+    if (existingClaim && claimTypeOf(existingClaim) === 'timesheet') {
+      patchTimesheetClaimInSupabase(existingClaim, patch);
+    }
   };
 
   const resetDemoData = () => {
@@ -1144,7 +1276,7 @@ export default function App() {
     setTab(claimTypeOf(claim));
   };
 
-  const saveEditedClaim = () => {
+  const saveEditedClaim = async () => {
     if (!editingClaimId || !editingOriginalClaim) return;
 
     const originalType = editingOriginalClaim.type || (editingOriginalClaim.expenses ? 'expense' : 'timesheet');
@@ -1221,6 +1353,10 @@ export default function App() {
 
       return [updatedClaim, ...withoutOldAndConflicts];
     });
+
+    if (updatedType === 'timesheet') {
+      await saveTimesheetClaimToSupabase(updatedClaim);
+    }
 
     setEditingClaimId(null);
     setEditingOriginalClaim(null);
@@ -1549,6 +1685,14 @@ export default function App() {
           <div className="card">
             <div className="card-content small muted">
               Profile lookup warning: {profileError}. Temporary email fallback is being used.
+            </div>
+          </div>
+        )}
+
+        {timesheetSyncStatus && (
+          <div className="card">
+            <div className="card-content small muted">
+              {timesheetSyncStatus}
             </div>
           </div>
         )}
