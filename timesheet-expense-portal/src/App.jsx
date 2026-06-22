@@ -3282,7 +3282,7 @@ function ExpenseForm(p) {
               aria-expanded={expenseSummaryOpen}
               onClick={() => setExpenseSummaryOpen(open => !open)}
             >
-              {expenseSummaryOpen ? '-' : '+'}
+              {expenseSummaryOpen ? 'Hide' : 'Expand'}
             </button>
           </div>
 
@@ -4270,7 +4270,8 @@ function ManagerAdminCategory({
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [selectedClaimId, setSelectedClaimId] = useState('');
-  const [expenseSummaryMonth, setExpenseSummaryMonth] = useState('All');
+  const [expenseSummaryPeriodType, setExpenseSummaryPeriodType] = useState('month');
+  const [expenseSummaryPeriod, setExpenseSummaryPeriod] = useState('');
   const receiptItems = receiptDownloadItemsFromClaims(claims);
   const isExpenseAdmin = claims.some(claim => claimTypeOf(claim) === 'expense');
   const pendingClaims = claims.filter(claim => claim.status === 'Submitted');
@@ -4289,10 +4290,23 @@ function ManagerAdminCategory({
         .filter(Boolean)
       )).sort().reverse()
     : [];
+  const expenseYearOptions = isExpenseAdmin
+    ? Array.from(new Set(expenseMonthOptions.map(month => String(month).slice(0, 4)).filter(Boolean))).sort().reverse()
+    : [];
+  const selectedExpenseSummaryPeriod = expenseSummaryPeriod || (
+    expenseSummaryPeriodType === 'year'
+      ? expenseYearOptions[0] || ''
+      : expenseMonthOptions[0] || ''
+  );
   const approvedExpenseItemsForSummary = isExpenseAdmin
     ? expenseItemsForSummary
         .filter(item => ['Approved', 'Paid'].includes(item.status))
-        .filter(item => expenseSummaryMonth === 'All' || item.month === expenseSummaryMonth)
+        .filter(item => {
+          if (!selectedExpenseSummaryPeriod) return false;
+          return expenseSummaryPeriodType === 'year'
+            ? String(item.month || '').startsWith(selectedExpenseSummaryPeriod)
+            : item.month === selectedExpenseSummaryPeriod;
+        })
     : [];
   const expenseGross = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => {
     return sum + (item.expense.approvalStatus === 'rejected'
@@ -4402,17 +4416,42 @@ function ManagerAdminCategory({
                 <p className="small muted">Approved and paid expenses only. Pending claims are not included yet.</p>
               </div>
               <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
-                <select className="select" value={expenseSummaryMonth} onChange={event => setExpenseSummaryMonth(event.target.value)} style={{ width: 200 }}>
-                  <option value="All">All Approved Months</option>
-                  {expenseMonthOptions.map(month => (
-                    <option key={month} value={month}>{monthLabel(month)}</option>
-                  ))}
+                <select
+                  className="select"
+                  value={expenseSummaryPeriodType}
+                  onChange={event => {
+                    setExpenseSummaryPeriodType(event.target.value);
+                    setExpenseSummaryPeriod('');
+                  }}
+                  style={{ width: 150 }}
+                >
+                  <option value="month">By Month</option>
+                  <option value="year">By Year</option>
+                </select>
+                <select
+                  className="select"
+                  value={selectedExpenseSummaryPeriod}
+                  onChange={event => setExpenseSummaryPeriod(event.target.value)}
+                  style={{ width: 200 }}
+                >
+                  {expenseSummaryPeriodType === 'year'
+                    ? expenseYearOptions.map(year => (
+                      <option key={year} value={year}>{year}</option>
+                    ))
+                    : expenseMonthOptions.map(month => (
+                      <option key={month} value={month}>{monthLabel(month)}</option>
+                    ))}
                 </select>
               </div>
             </div>
 
             <div className="grid grid-4" style={{ marginTop: 14 }}>
-              <Mini label="Claim Month" value={expenseSummaryMonth === 'All' ? 'All Approved Months' : monthLabel(expenseSummaryMonth)} />
+              <Mini
+                label={expenseSummaryPeriodType === 'year' ? 'Claim Year' : 'Claim Month'}
+                value={expenseSummaryPeriodType === 'year'
+                  ? selectedExpenseSummaryPeriod || 'No approved data'
+                  : selectedExpenseSummaryPeriod ? monthLabel(selectedExpenseSummaryPeriod) : 'No approved data'}
+              />
               <Mini label="Expense Claim Totals" value={money(expenseGross)} />
               <Mini label="Approved / Paid" value={money(expenseApprovedPaid)} />
               <Mini label="Company VAT Total" value={money(expenseVat)} />
