@@ -3486,17 +3486,49 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
 }
 
 function HistorySection({ title, claims, setReceipt, startEditClaim }) {
+  const [open, setOpen] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const filteredHistoryClaims = (claims || []).filter(claim => {
+    const haystack = [
+      claim.employeeName,
+      claim.email,
+      claim.weekLabel,
+      claim.week,
+      claim.periodLabel,
+      claim.expenseMonth,
+      claim.status,
+      claim.notes,
+      claim.expenses?.map(expense => [expense.date, expense.category, expense.description, expense.amount].join(' ')).join(' ')
+    ].join(' ').toLowerCase();
+
+    return haystack.includes(historySearch.toLowerCase());
+  });
+
   return (
     <div className="space-y-sm">
-      <div>
-        <p className="small muted">History</p>
-        <h2>{title}</h2>
-      </div>
-      <ClaimList
-        claims={claims || []}
-        setReceipt={setReceipt}
-        startEditClaim={startEditClaim}
-      />
+      <button className="btn secondary" type="button" onClick={() => setOpen(value => !value)}>
+        {open ? `Hide ${title}` : `Show ${title}`}
+      </button>
+
+      {open && (
+        <>
+          <div className="flex items-center gap" style={{ maxWidth: 520 }}>
+            <Search size={16} />
+            <input
+              className="input"
+              placeholder={`Search ${title.toLowerCase()}...`}
+              value={historySearch}
+              onChange={event => setHistorySearch(event.target.value)}
+            />
+          </div>
+
+          <ClaimList
+            claims={filteredHistoryClaims}
+            setReceipt={setReceipt}
+            startEditClaim={startEditClaim}
+          />
+        </>
+      )}
     </div>
   );
 }
