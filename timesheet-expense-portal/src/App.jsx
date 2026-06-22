@@ -3202,24 +3202,20 @@ function TimesheetForm(p) {
           <textarea className="textarea" value={p.employeeInfo.notes} onChange={e => p.setEmployeeInfo({ ...p.employeeInfo, notes: e.target.value })} />
 
           {p.editingClaimId ? (
-            <>
+            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
               <button className="btn" onClick={p.saveEditedClaim}>Save Changes</button>
-              {' '}
               <button className="btn secondary" onClick={p.cancelEditClaim}>Cancel</button>
-            </>
+              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
+            </div>
           ) : (
-            <>
+            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
               <button className="btn secondary" onClick={p.saveDraft}>Save Timesheet Draft</button>
-              {' '}
               <button className="btn" onClick={p.submitTimesheet}>Submit Timesheet</button>
-            </>
+              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
+            </div>
           )}
         </div>
       </div>
-
-      <button className="btn secondary" type="button" onClick={p.openHistory}>
-        History
-      </button>
 
       <div className="small muted space-y-sm">
         <p><b>Timesheet rules</b></p>
@@ -3388,16 +3384,16 @@ function ExpenseForm(p) {
             <div className="flex gap" style={{ flexWrap: 'wrap' }}>
               <button className="btn" onClick={p.saveEditedClaim}>Save Changes</button>
               <button className="btn secondary" onClick={p.cancelEditClaim}>Cancel</button>
+              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
             </div>
           ) : (
-            <button className="btn" onClick={p.submitExpense}>Submit Expense Claim</button>
+            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+              <button className="btn" onClick={p.submitExpense}>Submit Expense Claim</button>
+              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
+            </div>
           )}
         </div>
       </div>
-
-      <button className="btn secondary" type="button" onClick={p.openHistory}>
-        History
-      </button>
 
       <div className="small muted space-y-sm">
         <p><b>Claim expense rules</b></p>
