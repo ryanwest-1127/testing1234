@@ -2108,6 +2108,237 @@ function ProfileSetupNotice({ email, signOut }) {
 
 
 
+function EmployeeAccountsPanel() {
+  const [profiles, setProfiles] = useState([]);
+  const [drafts, setDrafts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState('');
+  const [message, setMessage] = useState('');
+
+  const profileSelect = 'id,email,full_name,role,department,start_date,weekly_hours,daily_hours,annual_leave_allowance,active';
+
+  const loadProfiles = async () => {
+    setLoading(true);
+    setMessage('');
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(profileSelect)
+      .order('full_name', { ascending: true });
+
+    if (error) {
+      setMessage(error.message);
+      setProfiles([]);
+      setDrafts({});
+      setLoading(false);
+      return;
+    }
+
+    const rows = data || [];
+    setProfiles(rows);
+    setDrafts(Object.fromEntries(rows.map(profile => [profile.id, {
+      ...profile,
+      start_date: profile.start_date || ''
+    }])));
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadProfiles();
+  }, []);
+
+  const updateDraft = (id, field, value) => {
+    setDrafts(prev => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {}),
+        [field]: value
+      }
+    }));
+  };
+
+  const saveProfile = async (id) => {
+    const draft = drafts[id];
+    if (!draft) return;
+
+    setSavingId(id);
+    setMessage('');
+
+    const payload = {
+      full_name: draft.full_name || '',
+      role: draft.role || 'employee',
+      department: draft.department || 'Production',
+      start_date: draft.start_date || null,
+      weekly_hours: Number(draft.weekly_hours || 0),
+      daily_hours: Number(draft.daily_hours || 0),
+      annual_leave_allowance: Number(draft.annual_leave_allowance || 0),
+      active: Boolean(draft.active),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', id)
+      .select(profileSelect)
+      .single();
+
+    if (error) {
+      setMessage(error.message);
+      setSavingId('');
+      return;
+    }
+
+    setProfiles(prev => prev.map(profile => profile.id === id ? data : profile));
+    setDrafts(prev => ({
+      ...prev,
+      [id]: {
+        ...data,
+        start_date: data.start_date || ''
+      }
+    }));
+    setMessage('Employee profile saved.');
+    setSavingId('');
+  };
+
+  return (
+    <div className="card">
+      <div className="card-content">
+        <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <p className="small muted">Boss Admin</p>
+            <h2>Employee Accounts</h2>
+            <p className="small muted">Manage profile data used for role, start date, working hours and annual leave allowance.</p>
+          </div>
+          <button className="btn secondary" type="button" onClick={loadProfiles} disabled={loading}>
+            {loading ? 'Loading...' : 'Refresh Profiles'}
+          </button>
+        </div>
+
+        {message && (
+          <div className="small muted" style={{ background: '#f8fafc', padding: 12, borderRadius: 8, marginTop: 12 }}>
+            {message}
+          </div>
+        )}
+
+        <p className="xsmall muted" style={{ marginTop: 12 }}>
+          New login users are created in Supabase Authentication first. This panel edits existing portal profiles.
+        </p>
+
+        <div className="wide" style={{ marginTop: 14 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Department</th>
+                <th>Start Date</th>
+                <th>Weekly Hours</th>
+                <th>Daily Hours</th>
+                <th>AL Allowance</th>
+                <th>Active</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan="10" className="muted">Loading profiles...</td></tr>
+              ) : profiles.length === 0 ? (
+                <tr><td colSpan="10" className="muted">No profiles found.</td></tr>
+              ) : profiles.map(profile => {
+                const draft = drafts[profile.id] || profile;
+
+                return (
+                  <tr key={profile.id}>
+                    <td>
+                      <input
+                        className="input"
+                        value={draft.full_name || ''}
+                        onChange={event => updateDraft(profile.id, 'full_name', event.target.value)}
+                      />
+                    </td>
+                    <td><span className="small">{profile.email}</span></td>
+                    <td>
+                      <select
+                        className="select"
+                        value={draft.role || 'employee'}
+                        onChange={event => updateDraft(profile.id, 'role', event.target.value)}
+                      >
+                        <option value="employee">Employee</option>
+                        <option value="manager">Manager</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        value={draft.department || ''}
+                        onChange={event => updateDraft(profile.id, 'department', event.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="date"
+                        value={draft.start_date || ''}
+                        onChange={event => updateDraft(profile.id, 'start_date', event.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.25"
+                        value={draft.weekly_hours ?? ''}
+                        onChange={event => updateDraft(profile.id, 'weekly_hours', event.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.25"
+                        value={draft.daily_hours ?? ''}
+                        onChange={event => updateDraft(profile.id, 'daily_hours', event.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.5"
+                        value={draft.annual_leave_allowance ?? ''}
+                        onChange={event => updateDraft(profile.id, 'annual_leave_allowance', event.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={draft.active !== false}
+                          onChange={event => updateDraft(profile.id, 'active', event.target.checked)}
+                        />
+                        Active
+                      </label>
+                    </td>
+                    <td>
+                      <button className="btn" type="button" onClick={() => saveProfile(profile.id)} disabled={savingId === profile.id}>
+                        {savingId === profile.id ? 'Saving...' : 'Save'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
 function Dashboard({
   visibleClaims,
   allEmployeeClaims,
@@ -2557,6 +2788,8 @@ function Dashboard({
           </div>
         </div>
       )}
+
+      {isManagerOverallDashboard && <EmployeeAccountsPanel />}
 
       {isManagerOverallDashboard && (
         <div className="card">
