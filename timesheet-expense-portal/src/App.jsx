@@ -9,6 +9,7 @@ import {
   ReceiptText, Users, FileCheck2, Search, WalletCards,
   CalendarDays, TrendingUp, Eye, RefreshCw, Building2
 } from 'lucide-react';
+import { supabase } from './supabaseClient';
 
 const STORAGE_KEY = 'timesheet-expense-saas-demo-v2';
 
@@ -628,6 +629,8 @@ function tabLabel(tab) {
 }
 
 export default function App() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [tab, setTab] = useState('dashboard');
   const [entryHistoryView, setEntryHistoryView] = useState(null);
   const [activeUser, setActiveUser] = useState(employees[0]);
@@ -661,6 +664,26 @@ export default function App() {
   const [editingClaimId, setEditingClaimId] = useState(null);
   const [editingOriginalClaim, setEditingOriginalClaim] = useState(null);
   const [reviewingClaimId, setReviewingClaimId] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -1290,6 +1313,26 @@ export default function App() {
     }, 50);
   };
 
+  const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  if (authLoading) {
+    return (
+      <div className="bg-gradient min-h-screen">
+        <div className="container">
+          <div className="card">
+            <div className="card-content muted">Checking login session...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen />;
+  }
+
 
   return (
     <div className="bg-gradient min-h-screen">
@@ -1332,7 +1375,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+            <div className="flex gap" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
                 <label className="label" style={{ color: '#cbd5e1' }}>Account</label>
                 <select
@@ -1348,6 +1391,14 @@ export default function App() {
                 </select>
               </div>
 
+              <div>
+                <p className="label" style={{ color: '#cbd5e1' }}>Signed in</p>
+                <p className="small" style={{ color: '#e2e8f0', marginTop: 8 }}>{session.user?.email}</p>
+              </div>
+
+              <button className="btn secondary" type="button" onClick={signOut}>
+                Logout
+              </button>
             </div>
           </div>
         </motion.header>
@@ -1770,6 +1821,106 @@ export default function App() {
       </div>
 
       {receipt && <ReceiptModal receipt={receipt} close={() => setReceipt(null)} />}
+    </div>
+  );
+}
+
+
+
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const signIn = async (event) => {
+    event.preventDefault();
+    setAuthMessage('');
+    setSubmitting(true);
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password
+    });
+
+    if (error) {
+      setAuthMessage(error.message);
+    }
+
+    setSubmitting(false);
+  };
+
+  const resetPassword = async () => {
+    setAuthMessage('');
+
+    if (!email.trim()) {
+      setAuthMessage('Enter your email first, then request a password reset.');
+      return;
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin
+    });
+
+    setAuthMessage(error ? error.message : 'Password reset email sent.');
+  };
+
+  return (
+    <div className="bg-gradient min-h-screen">
+      <div className="container">
+        <div className="card" style={{ maxWidth: 460, margin: '48px auto' }}>
+          <form className="card-content space-y-sm" onSubmit={signIn}>
+            <div>
+              <p className="small muted">Secure Login</p>
+              <h1 className="title" style={{ color: '#0f172a' }}>Timesheet & Expense Portal</h1>
+              <p className="small muted">Use your company account to access the portal.</p>
+            </div>
+
+            <div>
+              <label className="label">Email</label>
+              <input
+                className="input"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={event => setEmail(event.target.value)}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="label">Password</label>
+              <input
+                className="input"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={event => setPassword(event.target.value)}
+                required
+              />
+            </div>
+
+            {authMessage && (
+              <div className="small muted" style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
+                {authMessage}
+              </div>
+            )}
+
+            <div className="flex gap" style={{ flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+              <button className="btn" type="submit" disabled={submitting}>
+                {submitting ? 'Signing in...' : 'Login'}
+              </button>
+              <button className="btn secondary" type="button" onClick={resetPassword}>
+                Reset Password
+              </button>
+            </div>
+
+            <p className="xsmall muted">
+              Accounts are created by the company admin. Public sign-up is disabled in this app.
+            </p>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }
