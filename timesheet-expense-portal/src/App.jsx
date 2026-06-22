@@ -941,9 +941,15 @@ export default function App() {
       return;
     }
 
-    upsertClaim(buildExpenseClaim('Submitted'));
-    setExpenses([makeExpense()]);
-    setTab('dashboard');
+    const newClaim = buildExpenseClaim('Submitted');
+    const { nextClaims, savedClaim } = upsertClaimInList(claims, newClaim);
+
+    setClaims(nextClaims);
+    setExpenses(savedClaim.expenses || newClaim.expenses || [makeExpense()]);
+    setEmployeeInfo(p => ({ ...p, notes: '' }));
+    setEditingClaimId(savedClaim.id);
+    setEditingOriginalClaim(savedClaim);
+    setTab('expense');
   };
 
   const updateClaim = (id, patch) => {
@@ -1082,59 +1088,65 @@ export default function App() {
   };
 
 
-  const upsertClaim = (newClaim) => {
-    setClaims(prev => {
-      const newType = newClaim.type || (newClaim.expenses ? 'expense' : 'timesheet');
-      const existingIndex = prev.findIndex(c => {
-        const existingType = c.type || (c.expenses ? 'expense' : 'timesheet');
-        return c.employeeId === newClaim.employeeId &&
-          claimPeriodKey(c) === claimPeriodKey(newClaim) &&
-          existingType === newType;
+  const upsertClaimInList = (claimList, newClaim) => {
+    const newType = newClaim.type || (newClaim.expenses ? 'expense' : 'timesheet');
+    const existingIndex = claimList.findIndex(c => {
+      const existingType = c.type || (c.expenses ? 'expense' : 'timesheet');
+      return c.employeeId === newClaim.employeeId &&
+        claimPeriodKey(c) === claimPeriodKey(newClaim) &&
+        existingType === newType;
+    });
+
+    if (existingIndex >= 0) {
+      let savedClaim = null;
+      const nextClaims = claimList.map((c, index) => {
+        if (index !== existingIndex) return c;
+
+        if (newType !== 'expense') {
+          savedClaim = {
+            ...c,
+            ...newClaim,
+            id: c.id,
+            type: newType,
+            status: newClaim.status || c.status || 'Submitted',
+            updatedAt: new Date().toLocaleString('en-GB')
+          };
+          return savedClaim;
+        }
+
+        const mergedExpenses = [...(c.expenses || []), ...(newClaim.expenses || [])];
+        const totalExpense = mergedExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+        const totalVAT = mergedExpenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
+
+        savedClaim = {
+          ...c,
+          ...newClaim,
+          id: c.id,
+          type: newType,
+          status: expenseClaimStatusFromItems(mergedExpenses, newClaim.status || c.status || 'Submitted'),
+          submittedAt: c.submittedAt || newClaim.submittedAt,
+          expenses: mergedExpenses,
+          totals: {
+            ...(c.totals || {}),
+            ...(newClaim.totals || {}),
+            totalExpense,
+            totalVAT
+          },
+          approvedAmount: undefined,
+          updatedAt: new Date().toLocaleString('en-GB')
+        };
+        return savedClaim;
       });
 
-      if (existingIndex >= 0) {
-        return prev.map((c, index) =>
-          index === existingIndex
-            ? (() => {
-                if (newType !== 'expense') {
-                  return {
-                    ...c,
-                    ...newClaim,
-                    id: c.id,
-                    type: newType,
-                    status: newClaim.status || c.status || 'Submitted',
-                    updatedAt: new Date().toLocaleString('en-GB')
-                  };
-                }
+      return { nextClaims, savedClaim };
+    }
 
-                const mergedExpenses = [...(c.expenses || []), ...(newClaim.expenses || [])];
-                const totalExpense = mergedExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-                const totalVAT = mergedExpenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
+    const savedClaim = { ...newClaim, type: newType };
+    return { nextClaims: [savedClaim, ...claimList], savedClaim };
+  };
 
-                return {
-                  ...c,
-                  ...newClaim,
-                  id: c.id,
-                  type: newType,
-                  status: expenseClaimStatusFromItems(mergedExpenses, newClaim.status || c.status || 'Submitted'),
-                  submittedAt: c.submittedAt || newClaim.submittedAt,
-                  expenses: mergedExpenses,
-                  totals: {
-                    ...(c.totals || {}),
-                    ...(newClaim.totals || {}),
-                    totalExpense,
-                    totalVAT
-                  },
-                  approvedAmount: undefined,
-                  updatedAt: new Date().toLocaleString('en-GB')
-                };
-              })()
-            : c
-        );
-      }
-
-      return [{ ...newClaim, type: newType }, ...prev];
-    });
+  const upsertClaim = (newClaim) => {
+    setClaims(prev => upsertClaimInList(prev, newClaim).nextClaims);
   };
 
   const visibleLeaveRequests =
