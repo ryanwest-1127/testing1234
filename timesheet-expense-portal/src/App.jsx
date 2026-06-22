@@ -14,12 +14,14 @@ import { supabase } from './supabaseClient';
 const STORAGE_KEY = 'timesheet-expense-saas-demo-v2';
 
 const employees = [
-  { id: 'EMP001', name: 'Ryan Hei', email: 'ryan@example.com', role: 'Employee', department: 'Production' },
-  { id: 'EMP002', name: 'Alex Chan', email: 'alex@example.com', role: 'Employee', department: 'Operations' },
-  { id: 'EMP003', name: 'Jordan Lee', email: 'jordan@example.com', role: 'Employee', department: 'Workshop' },
-  { id: 'EMP004', name: 'Sam Wong', email: 'sam@example.com', role: 'Employee', department: 'Accounts' },
-  { id: 'MGR001', name: 'Boss', email: 'boss@example.com', role: 'Manager', department: 'Management' },
+  { id: 'EMP001', name: 'Ryan Hei', email: 'ryan@example.com', authEmail: 'employee.ryan@sazmedia.co.uk', role: 'Employee', department: 'Production' },
+  { id: 'EMP002', name: 'Alex Chan', email: 'alex@example.com', authEmail: 'alex@sazmedia.co.uk', role: 'Employee', department: 'Operations' },
+  { id: 'EMP003', name: 'Jordan Lee', email: 'jordan@example.com', authEmail: 'jordan@sazmedia.co.uk', role: 'Employee', department: 'Workshop' },
+  { id: 'EMP004', name: 'Sam Wong', email: 'sam@example.com', authEmail: 'sam@sazmedia.co.uk', role: 'Employee', department: 'Accounts' },
+  { id: 'MGR001', name: 'Ryan Hei', email: 'ryan@sazmedia.co.uk', authEmail: 'ryan@sazmedia.co.uk', role: 'Manager', department: 'Management' },
 ];
+
+const managerAuthEmails = new Set(['ryan@sazmedia.co.uk']);
 
 const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -628,6 +630,35 @@ function tabLabel(tab) {
   return tab[0].toUpperCase() + tab.slice(1);
 }
 
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function fallbackEmployeeFromSession(session) {
+  const email = normalizeEmail(session?.user?.email);
+  const name = email ? email.split('@')[0].replace(/[._-]+/g, ' ') : 'Employee';
+
+  return {
+    id: session?.user?.id || 'SESSION_EMPLOYEE',
+    name: name.replace(/\b\w/g, letter => letter.toUpperCase()),
+    email,
+    authEmail: email,
+    role: 'Employee',
+    department: 'Production'
+  };
+}
+
+function userForSession(session) {
+  const email = normalizeEmail(session?.user?.email);
+
+  if (managerAuthEmails.has(email)) {
+    return employees.find(employee => employee.role === 'Manager') || employees[0];
+  }
+
+  return employees.find(employee => normalizeEmail(employee.authEmail || employee.email) === email) ||
+    fallbackEmployeeFromSession(session);
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -696,6 +727,17 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ claims, leaveRequests }));
   }, [claims, leaveRequests]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    const sessionUser = userForSession(session);
+    setActiveUser(sessionUser);
+    setManagerDataMode(sessionUser.role === 'Manager' ? 'overall' : 'personal');
+    setTab('dashboard');
+    setEntryHistoryView(null);
+    setReviewingClaimId(null);
+  }, [session?.user?.id, session?.user?.email]);
 
   useEffect(() => {
     const defaultEmployee = activeUser.role === 'Manager' && managerDataMode === 'overall'
@@ -1378,17 +1420,7 @@ export default function App() {
             <div className="flex gap" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
                 <label className="label" style={{ color: '#cbd5e1' }}>Account</label>
-                <select
-                  className="select"
-                  value={activeUser.id}
-                  onChange={e => setActiveUser(employees.find(u => u.id === e.target.value))}
-                >
-                  {employees.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} — {u.role}
-                    </option>
-                  ))}
-                </select>
+                <div className="input" style={{ minWidth: 220 }}>{activeUser.name} — {activeUser.role}</div>
               </div>
 
               <div>
