@@ -3203,16 +3203,16 @@ function TimesheetForm(p) {
           <textarea className="textarea" value={p.employeeInfo.notes} onChange={e => p.setEmployeeInfo({ ...p.employeeInfo, notes: e.target.value })} />
 
           {p.editingClaimId ? (
-            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+            <div className="flex gap" style={{ flexWrap: 'wrap', justifyContent: 'flex-start', alignItems: 'flex-end', marginTop: 12 }}>
+              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
               <button className="btn" onClick={p.saveEditedClaim}>Save Changes</button>
               <button className="btn secondary" onClick={p.cancelEditClaim}>Cancel</button>
-              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
             </div>
           ) : (
-            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+            <div className="flex gap" style={{ flexWrap: 'wrap', justifyContent: 'flex-start', alignItems: 'flex-end', marginTop: 12 }}>
+              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
               <button className="btn secondary" onClick={p.saveDraft}>Save Timesheet Draft</button>
               <button className="btn" onClick={p.submitTimesheet}>Submit Timesheet</button>
-              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
             </div>
           )}
         </div>
@@ -3380,15 +3380,15 @@ function ExpenseForm(p) {
           )}
 
           {p.editingClaimId ? (
-            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+            <div className="flex gap" style={{ flexWrap: 'wrap', justifyContent: 'flex-start', alignItems: 'flex-end', marginTop: 12 }}>
+              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
               <button className="btn" onClick={p.saveEditedClaim}>Save Changes</button>
               <button className="btn secondary" onClick={p.cancelEditClaim}>Cancel</button>
-              <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
             </div>
           ) : (
-            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
-              <button className="btn" onClick={p.submitExpense}>Submit Expense Claim</button>
+            <div className="flex gap" style={{ flexWrap: 'wrap', justifyContent: 'flex-start', alignItems: 'flex-end', marginTop: 12 }}>
               <button className="btn secondary" type="button" onClick={p.openHistory}>History</button>
+              <button className="btn" onClick={p.submitExpense}>Submit Expense Claim</button>
             </div>
           )}
         </div>
