@@ -4285,7 +4285,6 @@ function ManagerAdminCategory({
     : [];
   const expenseMonthOptions = isExpenseAdmin
     ? Array.from(new Set(expenseItemsForSummary
-        .filter(item => ['Approved', 'Paid'].includes(item.status))
         .map(item => item.month)
         .filter(Boolean)
       )).sort().reverse()
@@ -4293,11 +4292,10 @@ function ManagerAdminCategory({
   const expenseYearOptions = isExpenseAdmin
     ? Array.from(new Set(expenseMonthOptions.map(month => String(month).slice(0, 4)).filter(Boolean))).sort().reverse()
     : [];
-  const selectedExpenseSummaryPeriod = expenseSummaryPeriod || (
-    expenseSummaryPeriodType === 'year'
-      ? expenseYearOptions[0] || ''
-      : expenseMonthOptions[0] || ''
-  );
+  const expenseSummaryPeriodOptions = expenseSummaryPeriodType === 'year' ? expenseYearOptions : expenseMonthOptions;
+  const selectedExpenseSummaryPeriod = expenseSummaryPeriodOptions.includes(expenseSummaryPeriod)
+    ? expenseSummaryPeriod
+    : expenseSummaryPeriodOptions[0] || '';
   const approvedExpenseItemsForSummary = isExpenseAdmin
     ? expenseItemsForSummary
         .filter(item => ['Approved', 'Paid'].includes(item.status))
@@ -4435,12 +4433,16 @@ function ManagerAdminCategory({
                   style={{ width: 200 }}
                 >
                   {expenseSummaryPeriodType === 'year'
-                    ? expenseYearOptions.map(year => (
+                    ? expenseSummaryPeriodOptions.length
+                      ? expenseYearOptions.map(year => (
                       <option key={year} value={year}>{year}</option>
                     ))
-                    : expenseMonthOptions.map(month => (
+                      : <option value="">No expense years</option>
+                    : expenseSummaryPeriodOptions.length
+                      ? expenseMonthOptions.map(month => (
                       <option key={month} value={month}>{monthLabel(month)}</option>
-                    ))}
+                    ))
+                      : <option value="">No expense months</option>}
                 </select>
               </div>
             </div>
