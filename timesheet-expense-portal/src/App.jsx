@@ -1590,6 +1590,7 @@ export default function App() {
                 saveEditedClaim,
                 cancelEditClaim,
                 historyClaims: filteredClaims.filter(claim => claimTypeOf(claim) === 'expense'),
+                expenseSummaryClaims: accountClaims.filter(claim => claimTypeOf(claim) === 'expense'),
                 startEditClaim,
                 openHistory: () => setEntryHistoryView('expense')
               }}
@@ -3236,27 +3237,25 @@ function TimesheetForm(p) {
 
 function ExpenseForm(p) {
   const currentExpenseTotal = p.expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  const currentVATTotal = p.expenses.reduce((sum, e) => sum + Number(e.vat || 0), 0);
+  const personalExpenseClaims = (p.expenseSummaryClaims || []).filter(claim => claimTypeOf(claim) === 'expense');
+  const editingClaim = personalExpenseClaims.find(claim => claim.id === p.editingClaimId);
+  const claimMonth = editingClaim ? getClaimExpenseMonth(editingClaim) : currentMonthValue();
+  const currentMonthClaims = personalExpenseClaims.filter(claim => getClaimExpenseMonth(claim) === claimMonth);
+  const savedCurrentMonthTotal = currentMonthClaims
+    .filter(claim => claim.id !== p.editingClaimId)
+    .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
+  const currentExpenseSummaryTotal = savedCurrentMonthTotal + currentExpenseTotal;
+  const currentPaidExpenseTotal = currentMonthClaims
+    .filter(claim => ['Approved', 'Paid'].includes(claim.status))
+    .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
 
   return (
     <div className="space-y">
       <div className="card">
-        <div className="card-content grid grid-4">
-          <div>
-            <label className="label">Employee</label>
-            {p.activeUser?.role === 'Manager' && !p.personalMode ? (
-              <select className="select" value={p.employeeInfo.employeeId} onChange={e => p.setClaimEmployee(e.target.value)}>
-                {p.employees.filter(u => u.role !== 'Manager').map(u => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
-            ) : (
-              <input className="input" value={p.employeeInfo.employeeName} disabled readOnly />
-            )}
-          </div>
-          <Mini label="Claim Month" value={monthLabel(currentMonthValue())} />
-          <Mini label="Current Expense Total" value={money(currentExpenseTotal)} />
-          <Mini label="Current VAT Total" value={money(currentVATTotal)} />
+        <div className="card-content grid grid-3">
+          <Mini label="Claim Month" value={monthLabel(claimMonth)} />
+          <Mini label="Current Expense Total" value={money(currentExpenseSummaryTotal)} />
+          <Mini label="Current Paid Expense Total" value={money(currentPaidExpenseTotal)} />
         </div>
       </div>
 
