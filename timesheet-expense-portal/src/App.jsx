@@ -174,7 +174,8 @@ function makeExpense() {
     vatRate: '20',
     vat: '',
     receiptName: '',
-    receiptPreview: ''
+    receiptPreview: '',
+    noPhotoProof: false
   };
 }
 
@@ -552,7 +553,7 @@ async function downloadReceiptZip(items, options = {}) {
 }
 
 function expensesMissingReceipts(expenses) {
-  return (expenses || []).some(expense => !expense.receiptName || !expense.receiptPreview);
+  return (expenses || []).some(expense => !expense.noPhotoProof && (!expense.receiptName || !expense.receiptPreview));
 }
 
 function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
@@ -855,6 +856,7 @@ export default function App() {
 
     setExpenseError('');
     updateExpense(i, 'receiptName', file.name);
+    updateExpense(i, 'noPhotoProof', false);
 
     const reader = new FileReader();
     reader.onload = () => updateExpense(i, 'receiptPreview', String(reader.result || ''));
@@ -3218,6 +3220,7 @@ function ExpenseForm(p) {
             const selectedVatRate = e.vatRate || 'custom';
             const vatIsCustom = selectedVatRate === 'custom';
             const hasReceiptProof = Boolean(e.receiptName && e.receiptPreview);
+            const noPhotoProof = Boolean(e.noPhotoProof);
 
             return (
             <div className="grid expense-row" key={e.id}>
@@ -3245,7 +3248,14 @@ function ExpenseForm(p) {
               <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
 
               <div className="receipt-proof-cell">
-                {hasReceiptProof ? (
+                {noPhotoProof ? (
+                  <div className="space-y-sm">
+                    <span className="badge Approved">No photo proof</span>
+                    <button className="btn ghost" type="button" onClick={() => p.updateExpense(i, 'noPhotoProof', false)}>
+                      Add proof
+                    </button>
+                  </div>
+                ) : hasReceiptProof ? (
                   <div className="receipt-proof">
                     <button
                       className="btn secondary receipt-proof-trigger"
@@ -3275,6 +3285,21 @@ function ExpenseForm(p) {
                   </label>
                 )}
               </div>
+
+              <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={noPhotoProof}
+                  onChange={ev => {
+                    p.updateExpense(i, 'noPhotoProof', ev.target.checked);
+                    if (ev.target.checked) {
+                      p.updateExpense(i, 'receiptName', '');
+                      p.updateExpense(i, 'receiptPreview', '');
+                    }
+                  }}
+                />
+                No photo proof
+              </label>
 
               <button className="btn ghost" onClick={() => p.setExpenses(prev => prev.filter((_, idx) => idx !== i))}>
                 <Trash2 size={16} />
@@ -4522,7 +4547,8 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
         <ClaimList
           claims={applicationClaims}
           setReceipt={setReceipt}
-          managerReadOnly
+          manager
+          updateClaim={updateExpenseApplication}
         />
       )}
     </div>
@@ -4713,7 +4739,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
                   <div className="grid grid-5 expense-summary-strip">
                     <Mini label="Expense Total" value={money(c.totals?.totalExpense)} />
                     <Mini label="VAT Total" value={money(c.totals?.totalVAT)} />
-                    <Mini label="Receipts" value={`${c.expenses?.filter(e => e.receiptName).length || 0}/${c.expenses?.length || 0}`} />
+                    <Mini label="Proofs" value={`${c.expenses?.filter(e => e.receiptName || e.noPhotoProof).length || 0}/${c.expenses?.length || 0}`} />
                     <Mini label="Status" value={expenseStatus} />
                     <Mini label="Company Approved Amount" value={money(c.approvedAmount ?? approvedExpenseAmount)} />
                   </div>
@@ -4765,9 +4791,11 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
                               <td><span className={`badge ${expenseRowStatus}`}>{expenseRowStatus}</span></td>
                             )}
                             <td>
-                              {e.receiptName
-                                ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
-                                : 'Missing'}
+                              {e.noPhotoProof
+                                ? <span className="badge Approved">No photo proof</span>
+                                : e.receiptName
+                                  ? <button className="btn ghost" onClick={() => setReceipt(e)}><Eye size={16} /> View</button>
+                                  : 'Missing'}
                             </td>
                             {canManageExpense && (
                               <td>
