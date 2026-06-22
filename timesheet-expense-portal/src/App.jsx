@@ -363,14 +363,14 @@ function claimTypeOf(claim) {
 
 function claimPeriodKey(claim) {
   return claimTypeOf(claim) === 'expense'
-    ? claim.expenseMonth || claim.month || claim.week || ''
+    ? getClaimExpenseMonth(claim)
     : claim.week || '';
 }
 
 function getClaimExpenseMonth(claim) {
-  return claim.expenseMonth ||
+  return monthFromSubmittedAt(claim.submittedAt) ||
+    claim.expenseMonth ||
     claim.month ||
-    monthFromSubmittedAt(claim.submittedAt) ||
     currentMonthValue();
 }
 
@@ -468,7 +468,7 @@ function uniqueClaimsByEmployeeWeekType(claims) {
       ? {
           ...claim,
           expenseMonth: getClaimExpenseMonth(claim),
-          periodLabel: claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)),
+          periodLabel: monthLabel(getClaimExpenseMonth(claim)),
           expenses: expenseItemsWithApplicationMetadata(claim)
         }
       : claim);
