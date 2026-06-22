@@ -3204,12 +3204,8 @@ function TimesheetForm(p) {
         <p>If you start at 9am you finish at 5pm.</p>
         <p>If you start at 9:30am you finish at 5:30pm etc.</p>
         <p>If you work half a day so 4hours or under you are not entitled to a break.</p>
-        <p><b>Working at a computer health and safety:</b></p>
-        <p>Frequency: Aim for a 5-10 minute break after every 50-60 minutes of continuous screen time.</p>
-        <p>Activity: Use breaks to move away from the screen, stretch, walk around, or do other non-screen tasks like making coffee or chatting or toilet break.</p>
-        <p>Eye Care (20-20-20 Rule): Every 20 minutes, look at something 20 feet away for 20 seconds to relax eye muscles.</p>
         <p>Lieu is classed as additional hours outside your standard working day.</p>
-        <p>You should count travel as anything that is outside the normal scope of your day to day, which I think is 30minutes for everyone travelling from home, to and from Salford Innovation Forum.</p>
+        <p>You should count travel as anything that is outside the normal scope of your day to day, which I think is 30minutes for everyone travelling from home, to and from office.</p>
         <p>For clarity if you are travelling and staying overnight in a hotel, once you arrive at the hotel your lieu time stops and once you arrive at the job your time continues. However if the time travelling to the job in the morning is beyond half hour then you can add on time.</p>
         <p>Anyone who works a weekend can switch the day off for a weekday the following week or be paid/ reimbursed time at 1.2 pay ratio.</p>
         <p>Lieu must be taken back within a month or loose it, unless other arrangement agreed with Sara.</p>
