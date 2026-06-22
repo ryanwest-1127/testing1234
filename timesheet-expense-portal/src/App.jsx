@@ -4004,33 +4004,43 @@ function ManagerAdminCategory({
   const receiptItems = receiptDownloadItemsFromClaims(claims);
   const isExpenseAdmin = claims.some(claim => claimTypeOf(claim) === 'expense');
   const pendingClaims = claims.filter(claim => claim.status === 'Submitted');
+  const expenseItemsForSummary = isExpenseAdmin
+    ? claims.flatMap(claim => (claim.expenses || []).map(expense => ({
+        claim,
+        expense,
+        status: expense.applicationStatus || claim.status || 'Submitted',
+        month: getClaimExpenseMonth(claim)
+      })))
+    : [];
   const expenseMonthOptions = isExpenseAdmin
-    ? Array.from(new Set(claims
-        .filter(claim => ['Approved', 'Paid'].includes(claim.status))
-        .map(claim => getClaimExpenseMonth(claim))
+    ? Array.from(new Set(expenseItemsForSummary
+        .filter(item => ['Approved', 'Paid'].includes(item.status))
+        .map(item => item.month)
         .filter(Boolean)
       )).sort().reverse()
     : [];
   const approvedExpenseItemsForSummary = isExpenseAdmin
-    ? claims
-        .filter(claim => ['Approved', 'Paid'].includes(claim.status))
-        .flatMap(claim => (claim.expenses || []).map(expense => ({
-          claim,
-          expense,
-          month: getClaimExpenseMonth(claim)
-        })))
+    ? expenseItemsForSummary
+        .filter(item => ['Approved', 'Paid'].includes(item.status))
         .filter(item => expenseSummaryMonth === 'All' || item.month === expenseSummaryMonth)
     : [];
-  const expenseGross = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => sum + Number(item.expense.amount || 0), 0) : 0;
+  const expenseGross = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => {
+    return sum + (item.expense.approvalStatus === 'rejected'
+      ? Number(item.expense.approvedAmount || 0)
+      : Number(item.expense.amount || 0));
+  }, 0) : 0;
   const expenseApprovedPaid = expenseGross;
   const expenseVat = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => sum + Number(item.expense.vat || 0), 0) : 0;
   const expenseByCategory = isExpenseAdmin
     ? Object.values(approvedExpenseItemsForSummary.reduce((groups, item) => {
         const category = item.expense.category || 'Other';
         const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
+        const approvedValue = item.expense.approvalStatus === 'rejected'
+          ? Number(item.expense.approvedAmount || 0)
+          : Number(item.expense.amount || 0);
         groups[category] = {
           ...existing,
-          value: existing.value + Number(item.expense.amount || 0),
+          value: existing.value + approvedValue,
           vat: existing.vat + Number(item.expense.vat || 0),
           count: existing.count + 1
         };
