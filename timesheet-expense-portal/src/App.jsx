@@ -2762,6 +2762,13 @@ function BusinessWeekPicker({ value, onChange }) {
     return start.getMonth();
   });
 
+  useEffect(() => {
+    const next = parseWeekValue(value);
+    const nextStart = getBusinessWeekStart(value);
+    setViewYear(next.year);
+    setViewMonth(nextStart.getMonth());
+  }, [value]);
+
   const currentYear = new Date().getFullYear();
   const weeksInYear = getWeeksInBusinessYear(viewYear);
 
@@ -2954,7 +2961,7 @@ function TimesheetForm(p) {
   const weekDates = getWeekDates(p.selectedWeek);
   return (
     <div className="space-y">
-      <div className="card">
+      <div className="card" key={`timesheet-week-${p.selectedWeek}`}>
         <div className="card-content grid grid-4">
           <div>
             <label className="label">Employee</label>
@@ -3238,6 +3245,11 @@ function ExpenseForm(p) {
             <div className="grid expense-row" key={e.id}>
               <input className="input" type="date" value={e.date} onChange={ev => p.updateExpense(i, 'date', ev.target.value)} />
 
+              <div className="space-y-sm">
+                <input className="input" placeholder="PJ name" value={e.projectName || ''} onChange={ev => p.updateExpense(i, 'projectName', ev.target.value)} />
+                <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
+              </div>
+
               <select className="select" value={e.category} onChange={ev => p.updateExpense(i, 'category', ev.target.value)}>
                 {categories.map(c => <option key={c}>{c}</option>)}
               </select>
@@ -3256,8 +3268,6 @@ function ExpenseForm(p) {
                 disabled={!vatIsCustom}
                 onChange={ev => p.updateExpense(i, 'vat', ev.target.value)}
               />
-              <input className="input" placeholder="PJ name" value={e.projectName || ''} onChange={ev => p.updateExpense(i, 'projectName', ev.target.value)} />
-              <input className="input" placeholder="Description" value={e.description} onChange={ev => p.updateExpense(i, 'description', ev.target.value)} />
 
               <div className="receipt-proof-cell">
                 {noPhotoProof ? (
@@ -3345,6 +3355,15 @@ function ExpenseForm(p) {
             <button className="btn" onClick={p.submitExpense}>Submit Expense Claim</button>
           )}
         </div>
+      </div>
+
+      <div className="small muted space-y-sm">
+        <p><b>Claim expense rules</b></p>
+        <p>Expenses should always have a receipt with VAT on.</p>
+        <p>Allocation for breakfast is £12. For lunch £15. For dinner £20, if it goes over that is fine but you will only reimbursed up to the allocated amount. (The only acceptation to this is pre-booked meals and special occasions arranged/ approved by me)</p>
+        <p>Travel - always try to book the cheapest travel and shortest journeys.</p>
+        <p>Mileage reimbursement rate: 45p (driver rate) + 5p (passenger 1) + 5p (passenger 2) = 55p per mile (for the first 10,000 miles). The passenger allowance of 5p per mile per person is also tax-free, provided the passengers are fellow employees also travelling for business purposes.</p>
+        <p>Any long distance travel should be sent to Sara to book - trains over £100 and hotels. You can however send info to me for any expense and I can book.</p>
       </div>
     </div>
   );

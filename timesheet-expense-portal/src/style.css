@@ -88,7 +88,7 @@ th { color: #64748b; font-weight: 700; }
 .expense-detail-card.expense-detail-Rejected { background: #fff1f2; border-color: #fda4af; }
 .expense-summary-strip { align-items: stretch; }
 .receipt-thumb { max-height: 380px; width: 100%; object-fit: contain; border-radius: 18px; }
-.expense-row { grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1.2fr 1.6fr 120px 130px auto; align-items: center; }
+.expense-row { grid-template-columns: 1fr 1.8fr 1fr 1fr 1fr 1fr 120px 130px auto; align-items: center; }
 .receipt-proof-cell { min-height: 42px; display: flex; align-items: center; }
 .receipt-proof { position: relative; display: inline-flex; }
 .receipt-proof-trigger { color: #047857; border-color: #86efac; background: #f0fdf4; min-width: 48px; }
