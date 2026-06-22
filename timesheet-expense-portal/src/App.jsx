@@ -629,6 +629,7 @@ function tabLabel(tab) {
 
 export default function App() {
   const [tab, setTab] = useState('dashboard');
+  const [entryHistoryView, setEntryHistoryView] = useState(null);
   const [activeUser, setActiveUser] = useState(employees[0]);
   const [managerDataMode, setManagerDataMode] = useState('overall');
   const [viewEmployeeId, setViewEmployeeId] = useState('All');
@@ -691,6 +692,7 @@ export default function App() {
       notes: ''
     });
     setReviewingClaimId(null);
+    setEntryHistoryView(null);
   }, [activeUser, managerDataMode]);
 
   const totals = useMemo(
@@ -792,6 +794,7 @@ export default function App() {
     setEditingClaimId(null);
     setEditingOriginalClaim(null);
     setExpenseError('');
+    setEntryHistoryView(null);
     setTab('dashboard');
     setViewEmployeeId(mode === 'overall' ? 'All' : activeUser.id);
   };
@@ -982,6 +985,7 @@ export default function App() {
     }
     setEditingClaimId(claim.id);
     setEditingOriginalClaim(claim);
+    setEntryHistoryView(null);
     setTab(claim.type === 'expense' ? 'expense' : 'timesheet');
   };
 
@@ -1076,6 +1080,7 @@ export default function App() {
     setTimesheet(defaultTimesheet());
     setExpenses([makeExpense()]);
     setTimeInLieu({ used: '0', earned: '0' });
+    setEntryHistoryView(null);
     setTab(updatedType === 'expense' ? 'expense' : 'timesheet');
   };
 
@@ -1421,6 +1426,7 @@ export default function App() {
               className={`tab ${tab === t ? 'active' : ''}`}
               onClick={() => {
                 setReviewingClaimId(null);
+                setEntryHistoryView(null);
                 setTab(t);
               }}
               key={t}
@@ -1481,6 +1487,15 @@ export default function App() {
                 expenses: accountClaims.filter(claim => claimTypeOf(claim) === 'expense' && claim.status === 'Submitted').length
               }}
             />
+          ) : entryHistoryView === 'timesheet' ? (
+            <HistorySection
+              title="Timesheet History"
+              claims={filteredClaims.filter(claim => claimTypeOf(claim) === 'timesheet')}
+              setReceipt={setReceipt}
+              startEditClaim={startEditClaim}
+              standalone
+              onBack={() => setEntryHistoryView(null)}
+            />
           ) : (
             <TimesheetForm
               {...{
@@ -1508,7 +1523,8 @@ export default function App() {
                 setTab,
                 historyClaims: filteredClaims.filter(claim => claimTypeOf(claim) === 'timesheet'),
                 startEditClaim,
-                setReceipt
+                setReceipt,
+                openHistory: () => setEntryHistoryView('timesheet')
               }}
             />
           )
@@ -1543,6 +1559,15 @@ export default function App() {
               }}
               showReceiptDownload
             />
+          ) : entryHistoryView === 'expense' ? (
+            <HistorySection
+              title="Expense History"
+              claims={filteredClaims.filter(claim => claimTypeOf(claim) === 'expense')}
+              setReceipt={setReceipt}
+              startEditClaim={startEditClaim}
+              standalone
+              onBack={() => setEntryHistoryView(null)}
+            />
           ) : (
             <ExpenseForm
               {...{
@@ -1565,7 +1590,8 @@ export default function App() {
                 saveEditedClaim,
                 cancelEditClaim,
                 historyClaims: filteredClaims.filter(claim => claimTypeOf(claim) === 'expense'),
-                startEditClaim
+                startEditClaim,
+                openHistory: () => setEntryHistoryView('expense')
               }}
             />
           )
@@ -3191,12 +3217,9 @@ function TimesheetForm(p) {
         </div>
       </div>
 
-      <HistorySection
-        title="Timesheet History"
-        claims={p.historyClaims || []}
-        setReceipt={p.setReceipt}
-        startEditClaim={p.startEditClaim}
-      />
+      <button className="btn secondary" type="button" onClick={p.openHistory}>
+        History
+      </button>
 
       <div className="small muted space-y-sm">
         <p><b>Timesheet rules</b></p>
@@ -3372,12 +3395,9 @@ function ExpenseForm(p) {
         </div>
       </div>
 
-      <HistorySection
-        title="Expense History"
-        claims={p.historyClaims || []}
-        setReceipt={p.setReceipt}
-        startEditClaim={p.startEditClaim}
-      />
+      <button className="btn secondary" type="button" onClick={p.openHistory}>
+        History
+      </button>
 
       <div className="small muted space-y-sm">
         <p><b>Claim expense rules</b></p>
@@ -3485,8 +3505,8 @@ function Filter({ search, setSearch, historyTypeFilter, setHistoryTypeFilter, se
   );
 }
 
-function HistorySection({ title, claims, setReceipt, startEditClaim }) {
-  const [open, setOpen] = useState(false);
+function HistorySection({ title, claims, setReceipt, startEditClaim, standalone = false, onBack }) {
+  const [open, setOpen] = useState(Boolean(standalone));
   const [historySearch, setHistorySearch] = useState('');
   const [historyViewMode, setHistoryViewMode] = useState('month');
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
@@ -3520,6 +3540,10 @@ function HistorySection({ title, claims, setReceipt, startEditClaim }) {
     setSelectedHistoryIndex(0);
   }, [historySearch, historyViewMode, open]);
 
+  useEffect(() => {
+    if (standalone) setOpen(true);
+  }, [standalone]);
+
   const editHistoryClaim = (claim) => {
     if (!startEditClaim || !claim) return;
     const parentClaim = claim.parentClaimId
@@ -3529,10 +3553,24 @@ function HistorySection({ title, claims, setReceipt, startEditClaim }) {
   };
 
   return (
-    <div className="space-y-sm">
-      <button className="btn secondary" type="button" onClick={() => setOpen(value => !value)}>
-        {open ? `Hide ${title}` : `Show ${title}`}
-      </button>
+    <div className={standalone ? 'space-y' : 'space-y-sm'}>
+      {standalone ? (
+        <div className="card">
+          <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <p className="small muted">History</p>
+              <h2>{title}</h2>
+            </div>
+            <button className="btn secondary" type="button" onClick={onBack}>
+              Back to Data Entry
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button className="btn secondary" type="button" onClick={() => setOpen(value => !value)}>
+          {open ? `Hide ${title}` : `Show ${title}`}
+        </button>
+      )}
 
       {open && (
         <>
