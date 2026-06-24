@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
-const STORAGE_KEY = 'timesheet-expense-saas-demo-v2';
 const BANK_HOLIDAY_CACHE_KEY = 'uk-bank-holidays-england-wales-v1';
 const UK_BANK_HOLIDAYS_URL = 'https://www.gov.uk/bank-holidays.json';
 const BANK_HOLIDAY_DIVISION = 'england-and-wales';
@@ -23,8 +22,6 @@ const employees = [
   { id: 'EMP004', name: 'Sam Wong', email: 'sam@example.com', authEmail: 'sam@sazmedia.co.uk', role: 'Employee', department: 'Accounts' },
   { id: 'MGR001', name: 'Ryan Hei', email: 'ryan@sazmedia.co.uk', authEmail: 'ryan@sazmedia.co.uk', role: 'Manager', department: 'Management' },
 ];
-
-const managerAuthEmails = new Set(['ryan@sazmedia.co.uk']);
 
 const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -699,17 +696,6 @@ function fallbackEmployeeFromSession(session) {
 
 function userForSession(session) {
   const email = normalizeEmail(session?.user?.email);
-  const metadataRole = normalizeEmail(session?.user?.user_metadata?.role || session?.user?.app_metadata?.role);
-  const [emailName, emailDomain] = email.split('@');
-
-  if (
-    managerAuthEmails.has(email) ||
-    metadataRole === 'manager' ||
-    metadataRole === 'boss' ||
-    (emailName === 'ryan' && emailDomain === 'sazmedia.co.uk')
-  ) {
-    return employees.find(employee => employee.role === 'Manager') || employees[0];
-  }
 
   return employees.find(employee => normalizeEmail(employee.authEmail || employee.email) === email) ||
     fallbackEmployeeFromSession(session);
@@ -916,18 +902,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      setClaims(saved.claims || []);
-      setLeaveRequests(saved.leaveRequests || []);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ claims, leaveRequests }));
-  }, [claims, leaveRequests]);
-
-  useEffect(() => {
     let cancelled = false;
 
     const loadBankHolidays = async () => {
@@ -986,18 +960,15 @@ export default function App() {
       if (cancelled) return;
 
       if (error) {
-        const fallbackUser = userForSession(session);
         setProfile(null);
-        setProfileMissing(false);
+        setProfileMissing(true);
         setProfileError(error.message);
-        setActiveUser(fallbackUser);
-        setManagerDataMode(fallbackUser.role === 'Manager' ? 'overall' : 'personal');
       } else if (!data) {
         const fallbackUser = userForSession(session);
         setProfile(null);
         setProfileMissing(true);
         setActiveUser(fallbackUser);
-        setManagerDataMode(fallbackUser.role === 'Manager' ? 'overall' : 'personal');
+        setManagerDataMode('personal');
       } else {
         const profileUser = userFromProfile(data, session);
         setProfile(data);
@@ -1371,39 +1342,43 @@ export default function App() {
     if (!file) return;
 
     setExpenseError('');
-    updateExpense(i, 'receiptName', file.name);
-    updateExpense(i, 'noPhotoProof', false);
 
-    if (isUuid(employeeInfo.employeeId)) {
-      const extension = String(file.name || '').match(/\.[a-z0-9]+$/i)?.[0] || '';
-      const path = `${employeeInfo.employeeId}/${crypto.randomUUID()}${extension}`;
-      const { error } = await supabase
-        .storage
-        .from('receipt-proofs')
-        .upload(path, file, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: file.type || undefined
-        });
-
-      if (!error) {
-        const { data } = await supabase
-          .storage
-          .from('receipt-proofs')
-          .createSignedUrl(path, 60 * 60 * 24);
-
-        updateExpense(i, 'receiptPath', path);
-        updateExpense(i, 'receiptMimeType', file.type || '');
-        updateExpense(i, 'receiptPreview', data?.signedUrl || '');
-        return;
-      }
-
-      setExpenseError(`Receipt upload warning: ${error.message}`);
+    if (!isUuid(employeeInfo.employeeId)) {
+      setExpenseError('Receipt upload needs a Supabase employee profile before it can be saved securely.');
+      return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => updateExpense(i, 'receiptPreview', String(reader.result || ''));
-    reader.readAsDataURL(file);
+    const extension = String(file.name || '').match(/\.[a-z0-9]+$/i)?.[0] || '';
+    const path = `${employeeInfo.employeeId}/${crypto.randomUUID()}${extension}`;
+    const { error } = await supabase
+      .storage
+      .from('receipt-proofs')
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || undefined
+      });
+
+    if (error) {
+      setExpenseError(`Receipt upload failed: ${error.message}`);
+      return;
+    }
+
+    const { data, error: signedUrlError } = await supabase
+      .storage
+      .from('receipt-proofs')
+      .createSignedUrl(path, 60 * 60 * 24);
+
+    if (signedUrlError) {
+      setExpenseError(`Receipt preview failed: ${signedUrlError.message}`);
+      return;
+    }
+
+    updateExpense(i, 'receiptName', file.name);
+    updateExpense(i, 'noPhotoProof', false);
+    updateExpense(i, 'receiptPath', path);
+    updateExpense(i, 'receiptMimeType', file.type || '');
+    updateExpense(i, 'receiptPreview', data?.signedUrl || '');
   };
 
   const commonClaimFields = status => ({
@@ -1638,14 +1613,6 @@ export default function App() {
       patchExpenseClaimInSupabase(existingClaim, patch);
     }
   };
-
-  const resetDemoData = () => {
-    if (window.confirm('Are you sure you want to delete all demo data? This cannot be undone.')) {
-      localStorage.clear();
-      window.location.reload();
-    }
-  };
-
 
   const startEditClaim = (claim) => {
     setReviewingClaimId(null);
@@ -2114,7 +2081,7 @@ export default function App() {
               <div>
                 <p className="label" style={{ color: '#cbd5e1' }}>Portal role</p>
                 <p className="small" style={{ color: '#e2e8f0', marginTop: 8 }}>
-                  {activeUser.role}{profile ? ' via profile' : ' fallback'}
+                  {activeUser.role}
                 </p>
               </div>
 
@@ -2128,7 +2095,7 @@ export default function App() {
         {profileError && (
           <div className="card">
             <div className="card-content small muted">
-              Profile lookup warning: {profileError}. Temporary email fallback is being used.
+              Profile lookup warning: {profileError}. Please check this account has an active Supabase profile.
             </div>
           </div>
         )}
@@ -2217,7 +2184,6 @@ export default function App() {
 
         {visibleTabs.length > 0 && (
         <div className="tabs">
-          <button className="btn danger" onClick={resetDemoData}>Reset Demo Data</button>
           {visibleTabs.map(t => (
             <button
               className={`tab ${tab === t ? 'active' : ''}`}
@@ -2584,14 +2550,6 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'manager' && (
-          activeUser.role !== 'Manager'
-            ? <div className="card"><div className="card-content muted">Switch to Manager demo user to approve claims.</div></div>
-            : <>
-                <Filter {...{ search, setSearch, historyTypeFilter, setHistoryTypeFilter, setClaims }} />
-                <ClaimList claims={filteredClaims} setReceipt={setReceipt} manager updateClaim={updateClaim} startEditClaim={startEditClaim} activeUser={activeUser} />
-              </>
-        )}
       </div>
 
       {receipt && <ReceiptModal receipt={receipt} close={() => setReceipt(null)} />}
@@ -3231,10 +3189,6 @@ function Dashboard({
         })
     : [];
 
-  const selectedBossEmployee = isManager && viewEmployeeId !== 'All'
-    ? bossEmployeeSummaries.find(employee => employee.id === viewEmployeeId)
-    : null;
-
   const allPendingApplications = isManager
     ? [
         ...(allEmployeeClaims || [])
@@ -3286,99 +3240,6 @@ function Dashboard({
           vat: money(claim.totals?.totalVAT)
         }))
     : [];
-
-  const selectedEmployeeLeaveRequests = selectedBossEmployee
-    ? (allLeaveRequests || []).filter(request => request.employeeId === selectedBossEmployee.id)
-    : [];
-
-  const selectedEmployeeClaims = selectedBossEmployee
-    ? uniqueClaimsByEmployeeWeekType(allEmployeeClaims || [])
-        .filter(claim => claim.employeeId === selectedBossEmployee.id)
-    : [];
-  const selectedEmployeeReceiptItems = receiptDownloadItemsFromClaims(selectedEmployeeClaims);
-
-  const selectedEmployeeApplications = selectedBossEmployee
-    ? [
-        ...selectedEmployeeClaims.map(claim => ({
-          id: claim.id,
-          type: claimTypeOf(claim) === 'expense' ? 'Expense' : 'Timesheet',
-          claimType: claimTypeOf(claim),
-          period: claimTypeOf(claim) === 'expense'
-            ? (claim.periodLabel || monthLabel(getClaimExpenseMonth(claim)))
-            : (claim.weekLabel || claim.week),
-          status: claim.status,
-          summary: claimTypeOf(claim) === 'expense'
-            ? money(claim.totals?.totalExpense)
-            : `${Number(claim.totals?.totalWorkingHours || 0).toFixed(2)} hrs`,
-          source: 'claim'
-        })),
-        ...selectedEmployeeLeaveRequests.map(request => ({
-          id: request.id,
-          type: 'Annual Leave',
-          claimType: 'annualLeave',
-          period: `${request.startDate} -> ${request.endDate}`,
-          status: request.status,
-          summary: `${calculateLeaveDays(request, dashboardBankHolidayDateSet)} day(s)`,
-          source: 'leave'
-        }))
-      ].sort((a, b) => String(b.period || '').localeCompare(String(a.period || '')))
-    : [];
-
-  const approveApplication = (application) => {
-    if (application.source === 'leave') {
-      updateLeaveRequest(application.id, { status: 'Approved' });
-      return;
-    }
-
-    updateClaim(application.id, { status: 'Approved' });
-  };
-
-  const rejectApplication = (application) => {
-    if (application.source === 'leave') {
-      updateLeaveRequest(application.id, { status: 'Rejected' });
-      return;
-    }
-
-    updateClaim(application.id, { status: 'Rejected' });
-  };
-
-  const markApplicationPaid = (application) => {
-    updateClaim(application.id, { status: 'Paid' });
-  };
-
-  const viewEmployeeProfile = (employeeId) => {
-    setViewEmployeeId(employeeId);
-    setDashboardWeek('current');
-    window.setTimeout(() => {
-      document.getElementById('manager-employee-profile')?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start'
-      });
-    }, 50);
-  };
-
-  const openApplication = (application) => {
-    if (application.source === 'leave') {
-      const request = (allLeaveRequests || []).find(item => item.id === application.id);
-      if (!request) return;
-
-      setViewEmployeeId(request.employeeId);
-      setAlMonth(request.startDate?.slice(0, 7) || currentMonthValue());
-      setHighlightedLeaveId(request.id);
-      setTab('annualLeave');
-
-      window.setTimeout(() => {
-        document.getElementById(`leave-row-${request.id}`)?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center'
-        });
-      }, 100);
-      return;
-    }
-
-    const claim = (allEmployeeClaims || []).find(item => item.id === application.id);
-    if (claim) openClaimForReview(claim);
-  };
 
   const targetHours = Number(weeklyStandardHours || 0);
 
@@ -3721,278 +3582,6 @@ function Dashboard({
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {false && isManagerOverallDashboard && (
-        <div className="card">
-          <div className="card-content">
-            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <p className="small muted">Overall Dashboard</p>
-                <h2>All Employees Summary</h2>
-                <p className="small muted">Overall employee status, expense totals and application workload.</p>
-              </div>
-              <button
-                className="btn secondary"
-                type="button"
-                disabled={companyReceiptItems.length === 0}
-                onClick={() => downloadReceiptItems(companyReceiptItems)}
-              >
-                Download All Receipts ({companyReceiptItems.length})
-              </button>
-            </div>
-
-            <div className="grid grid-4" style={{ marginTop: 14 }}>
-              <Mini label="Company Expense Total" value={money(companyExpenseTotal)} />
-              <Mini label="All Expense Claims" value={money(companyExpenseGross)} />
-              <Mini label="Approved / Paid" value={money(companyExpenseApprovedPaid)} />
-              <Mini label="Company VAT Total" value={money(companyVATTotal)} />
-            </div>
-
-            <div className="grid grid-4" style={{ marginTop: 12 }}>
-              <Mini label="Pending Timesheets" value={String(managerApprovalCounts.timesheets)} />
-              <Mini label="Pending Expenses" value={String(managerApprovalCounts.expenses)} />
-              <Mini label="Pending Annual Leave" value={String(managerApprovalCounts.annualLeave)} />
-              <Mini label="Expenses Awaiting Payment" value={String(approvedExpensesAwaitingPayment.length)} />
-            </div>
-
-            <div className="grid grid-2-1" style={{ marginTop: 18 }}>
-              <div className="wide">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Employee</th>
-                      <th>Department</th>
-                      <th>Current Week Hours</th>
-                      <th>AL Remaining</th>
-                      <th>TIL Remaining</th>
-                      <th>Total Expense</th>
-                      <th>Pending</th>
-                      <th>Profile</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bossEmployeeSummaries.map(({ summary, ...employee }) => (
-                      <tr key={employee.id} style={viewEmployeeId === employee.id ? { background: '#dbeafe' } : undefined}>
-                        <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
-                        <td>{employee.department}</td>
-                        <td>{Number(summary.totalWorkingHours || 0).toFixed(2)} / {Number(summary.targetHours || 0).toFixed(2)} hrs</td>
-                        <td>{summary.annualLeaveRemaining} / {summary.annualLeaveTotal} days</td>
-                        <td>{Number(summary.timeInLieuRemaining || 0).toFixed(2)} hrs</td>
-                        <td>{money(summary.outstandingExpenses)}</td>
-                        <td><span className={`badge ${summary.pendingApproval ? 'Submitted' : ''}`}>{summary.pendingApproval}</span></td>
-                        <td>
-                          <button className="btn secondary" type="button" onClick={() => viewEmployeeProfile(employee.id)}>
-                            View Profile
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div>
-                <h3 style={{ marginTop: 0 }}>Expense by Category</h3>
-                <p className="small muted">Based on all employee expense claims.</p>
-                {companyExpenseByCategory.length === 0 ? (
-                  <div className="muted" style={{ padding: 24 }}>No expense category data yet.</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <PieChart>
-                      <Pie
-                        data={companyExpenseByCategory}
-                        dataKey="value"
-                        nameKey="name"
-                        outerRadius={92}
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {companyExpenseByCategory.map((item, index) => (
-                          <Cell key={item.name} fill={expensePieColors[index % expensePieColors.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value) => money(value)} />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {false && isManagerOverallDashboard && (
-        <div className="card">
-          <div className="card-content">
-            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <h2>Pending Applications</h2>
-                <p className="small muted">Approve or reject all submitted AL, timesheet and expense applications from the dashboard.</p>
-              </div>
-              <span className={`badge ${allPendingApplications.length ? 'Submitted' : ''}`}>
-                {allPendingApplications.length} pending
-              </span>
-            </div>
-
-            {allPendingApplications.length === 0 ? (
-              <p className="muted" style={{ marginTop: 14 }}>No pending applications.</p>
-            ) : (
-              <div className="wide" style={{ marginTop: 14 }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Employee</th>
-                      <th>Application</th>
-                      <th>Period</th>
-                      <th>Summary</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allPendingApplications.map(application => (
-                      <tr key={`${application.source}-${application.id}`}>
-                        <td>{application.employeeName}</td>
-                        <td>{application.type}</td>
-                        <td>{application.period}</td>
-                        <td>{application.summary}</td>
-                        <td>
-                          <button className="btn" onClick={() => approveApplication(application)}>Approve</button>
-                          {' '}
-                          <button className="btn danger" onClick={() => rejectApplication(application)}>Reject</button>
-                          {' '}
-                          <button className="btn secondary" onClick={() => openApplication(application)}>Open Application</button>
-                          {' '}
-                          <button className="btn ghost" onClick={() => viewEmployeeProfile(application.employeeId)}>View Profile</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {false && isManagerOverallDashboard && approvedExpensesAwaitingPayment.length > 0 && (
-        <div className="card">
-          <div className="card-content">
-            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <h2>Expenses Awaiting Payment</h2>
-                <p className="small muted">Approved expense claims that still need to be marked as paid.</p>
-              </div>
-              <span className="badge Approved">{approvedExpensesAwaitingPayment.length} approved</span>
-            </div>
-
-            <div className="wide" style={{ marginTop: 14 }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Month</th>
-                    <th>Expense Total</th>
-                    <th>VAT</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {approvedExpensesAwaitingPayment.map(expense => (
-                    <tr key={expense.id}>
-                      <td>{expense.employeeName}</td>
-                      <td>{expense.period}</td>
-                      <td>{expense.summary}</td>
-                      <td>{expense.vat}</td>
-                      <td>
-                        <button className="btn secondary" onClick={() => markApplicationPaid(expense)}>
-                          Mark as Paid
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {false && isManagerOverallDashboard && selectedBossEmployee && (
-        <div className="card" id="manager-employee-profile">
-          <div className="card-content space-y-sm">
-            <div className="flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <p className="small muted">Employee Profile</p>
-                <h2>{selectedBossEmployee.name}</h2>
-                <p className="small muted">{selectedBossEmployee.email} · {selectedBossEmployee.department}</p>
-                <p className="xsmall muted">{selectedEmployeeApplications.length} saved application(s)</p>
-              </div>
-              <button className="btn secondary" type="button" onClick={() => setViewEmployeeId('All')}>
-                Back to All Employees
-              </button>
-              <button
-                className="btn secondary"
-                type="button"
-                disabled={selectedEmployeeReceiptItems.length === 0}
-                onClick={() => downloadReceiptItems(selectedEmployeeReceiptItems)}
-              >
-                Download Employee Receipts ({selectedEmployeeReceiptItems.length})
-              </button>
-            </div>
-
-            <div className="grid grid-4">
-              <Mini label="Current Week Hours" value={`${Number(selectedBossEmployee.summary.totalWorkingHours || 0).toFixed(2)} / ${Number(selectedBossEmployee.summary.targetHours || 0).toFixed(2)} hrs`} />
-              <Mini label="AL Remaining" value={`${selectedBossEmployee.summary.annualLeaveRemaining} / ${selectedBossEmployee.summary.annualLeaveTotal} days`} />
-              <Mini label="TIL Remaining" value={`${Number(selectedBossEmployee.summary.timeInLieuRemaining || 0).toFixed(2)} hrs`} />
-              <Mini label="Total Expense" value={money(selectedBossEmployee.summary.outstandingExpenses)} />
-            </div>
-
-            <div className="wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Period</th>
-                    <th>Status</th>
-                    <th>Summary</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedEmployeeApplications.map(application => {
-                    return (
-                      <tr key={`${application.source}-${application.id}`}>
-                        <td>{application.type}</td>
-                        <td>{application.period}</td>
-                        <td><span className={`badge ${application.status}`}>{application.status}</span></td>
-                        <td>{application.summary}</td>
-                        <td>
-                          {application.status === 'Submitted' ? (
-                            <>
-                              <button className="btn" onClick={() => approveApplication(application)}>Approve</button>
-                              {' '}
-                              <button className="btn danger" onClick={() => rejectApplication(application)}>Reject</button>
-                            </>
-                          ) : application.claimType === 'expense' && application.status === 'Approved' ? (
-                            <button className="btn secondary" onClick={() => markApplicationPaid(application)}>Mark as Paid</button>
-                          ) : (
-                            <span className="small muted">Locked</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {selectedEmployeeApplications.length === 0 && (
-                    <tr>
-                      <td colSpan="5" className="muted">No saved applications for this employee yet.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
           </div>
         </div>
       )}
@@ -4789,11 +4378,13 @@ function ExpenseForm(p) {
                 <input
                   type="checkbox"
                   checked={noPhotoProof}
-                  onChange={ev => {
-                    p.updateExpense(i, 'noPhotoProof', ev.target.checked);
-                    if (ev.target.checked) {
-                      p.updateExpense(i, 'receiptName', '');
-                      p.updateExpense(i, 'receiptPreview', '');
+	                  onChange={ev => {
+	                    p.updateExpense(i, 'noPhotoProof', ev.target.checked);
+	                    if (ev.target.checked) {
+	                      p.updateExpense(i, 'receiptName', '');
+	                      p.updateExpense(i, 'receiptPreview', '');
+                      p.updateExpense(i, 'receiptPath', '');
+                      p.updateExpense(i, 'receiptMimeType', '');
                     }
                   }}
                 />

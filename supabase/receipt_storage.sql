@@ -33,24 +33,16 @@ with check (
 );
 
 drop policy if exists "receipt_proofs_update_own_or_manager" on storage.objects;
-create policy "receipt_proofs_update_own_or_manager"
+drop policy if exists "receipt_proofs_update_manager" on storage.objects;
+create policy "receipt_proofs_update_manager"
 on storage.objects
 for update
-using (
-  bucket_id = 'receipt-proofs'
-  and ((storage.foldername(name))[1] = auth.uid()::text or public.is_manager())
-)
-with check (
-  bucket_id = 'receipt-proofs'
-  and ((storage.foldername(name))[1] = auth.uid()::text or public.is_manager())
-);
+using (bucket_id = 'receipt-proofs' and public.is_manager())
+with check (bucket_id = 'receipt-proofs' and public.is_manager());
 
 drop policy if exists "receipt_proofs_delete_own_or_manager" on storage.objects;
-create policy "receipt_proofs_delete_own_or_manager"
+drop policy if exists "receipt_proofs_delete_manager" on storage.objects;
+create policy "receipt_proofs_delete_manager"
 on storage.objects
 for delete
-using (
-  bucket_id = 'receipt-proofs'
-  and ((storage.foldername(name))[1] = auth.uid()::text or public.is_manager())
-);
-
+using (bucket_id = 'receipt-proofs' and public.is_manager());

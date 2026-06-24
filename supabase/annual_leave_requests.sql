@@ -25,15 +25,16 @@ for insert
 with check (employee_id = auth.uid() or public.is_manager());
 
 drop policy if exists "annual_leave_requests_update_own_or_manager" on public.annual_leave_requests;
-create policy "annual_leave_requests_update_own_or_manager"
+drop policy if exists "annual_leave_requests_update_manager" on public.annual_leave_requests;
+create policy "annual_leave_requests_update_manager"
 on public.annual_leave_requests
 for update
-using (employee_id = auth.uid() or public.is_manager())
-with check (employee_id = auth.uid() or public.is_manager());
+using (public.is_manager() or (employee_id = auth.uid() and status = 'Submitted'))
+with check (public.is_manager() or (employee_id = auth.uid() and status = 'Submitted'));
 
 drop policy if exists "annual_leave_requests_delete_own_or_manager" on public.annual_leave_requests;
-create policy "annual_leave_requests_delete_own_or_manager"
+drop policy if exists "annual_leave_requests_delete_manager" on public.annual_leave_requests;
+create policy "annual_leave_requests_delete_manager"
 on public.annual_leave_requests
 for delete
-using (employee_id = auth.uid() or public.is_manager());
-
+using (public.is_manager() or (employee_id = auth.uid() and status = 'Submitted'));

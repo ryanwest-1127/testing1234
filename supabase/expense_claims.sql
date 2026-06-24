@@ -27,15 +27,16 @@ for insert
 with check (employee_id = auth.uid() or public.is_manager());
 
 drop policy if exists "expense_claims_update_own_or_manager" on public.expense_claims;
-create policy "expense_claims_update_own_or_manager"
+drop policy if exists "expense_claims_update_manager" on public.expense_claims;
+create policy "expense_claims_update_manager"
 on public.expense_claims
 for update
-using (employee_id = auth.uid() or public.is_manager())
-with check (employee_id = auth.uid() or public.is_manager());
+using (public.is_manager() or (employee_id = auth.uid() and status in ('Draft', 'Submitted')))
+with check (public.is_manager() or (employee_id = auth.uid() and status in ('Draft', 'Submitted')));
 
 drop policy if exists "expense_claims_delete_own_or_manager" on public.expense_claims;
-create policy "expense_claims_delete_own_or_manager"
+drop policy if exists "expense_claims_delete_manager" on public.expense_claims;
+create policy "expense_claims_delete_manager"
 on public.expense_claims
 for delete
-using (employee_id = auth.uid() or public.is_manager());
-
+using (public.is_manager() or (employee_id = auth.uid() and status in ('Draft', 'Submitted')));
