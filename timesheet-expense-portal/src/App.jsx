@@ -2569,6 +2569,21 @@ export default function App() {
           )
         )}
 
+        {tab === 'management' && activeUser.role === 'Manager' && managerDataMode === 'overall' && (
+          <div className="space-y">
+            <ApprovalDashboardNav
+              setTab={setTab}
+              currentTab="management"
+              counts={{
+                annualLeave: companyAlSubmitted,
+                timesheets: accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet' && claim.status === 'Submitted').length,
+                expenses: accountClaims.filter(claim => claimTypeOf(claim) === 'expense' && claim.status === 'Submitted').length
+              }}
+            />
+            <EmployeeAccountsPanel onProfilesChanged={() => setProfileReloadKey(key => key + 1)} />
+          </div>
+        )}
+
         {tab === 'manager' && (
           activeUser.role !== 'Manager'
             ? <div className="card"><div className="card-content muted">Switch to Manager demo user to approve claims.</div></div>
@@ -3456,7 +3471,7 @@ function Dashboard({
               <p className="small muted">Open each application database to review details and approve or reject records.</p>
             </div>
 
-            <div className="grid grid-3" style={{ marginTop: 16 }}>
+            <div className="grid grid-4" style={{ marginTop: 16 }}>
               <button
                 className={`approval-tile ${managerApprovalCounts.annualLeave ? 'pending' : ''}`}
                 type="button"
@@ -3495,12 +3510,23 @@ function Dashboard({
                   <p className="small muted">{approvedExpensesAwaitingPayment.length} approved awaiting payment</p>
                 </div>
               </button>
+
+              <button
+                className="approval-tile"
+                type="button"
+                onClick={() => setTab('management')}
+              >
+                <span className="status-light" />
+                <div>
+                  <h2 className="approval-tile-title">Management</h2>
+                  <p className="approval-tile-count">{employeeDirectory.length} employee account(s)</p>
+                  <p className="small muted">Manage employee profiles, roles, hours and AL allowance</p>
+                </div>
+              </button>
             </div>
           </div>
         </div>
       )}
-
-      {isManagerOverallDashboard && <EmployeeAccountsPanel onProfilesChanged={reloadProfiles} />}
 
       {isManagerOverallDashboard && (
         <div className="card">
@@ -5056,7 +5082,8 @@ function ApprovalDashboardNav({ setTab, currentTab, counts = {}, hideBeforeCurre
     { key: 'dashboard', title: 'Dashboard', count: null, note: 'Approval overview' },
     { key: 'annualLeave', title: 'AL Applications', count: counts.annualLeave || 0, note: 'Annual leave requests' },
     { key: 'timesheet', title: 'Timesheet Applications', count: counts.timesheets || 0, note: 'Timesheet submissions' },
-    { key: 'expense', title: 'Expense Applications', count: counts.expenses || 0, note: 'Expense claims' }
+    { key: 'expense', title: 'Expense Applications', count: counts.expenses || 0, note: 'Expense claims' },
+    { key: 'management', title: 'Management', count: null, note: 'Employee accounts' }
   ];
   const visibleItems = hideBeforeCurrent
     ? items.slice(Math.max(0, items.findIndex(item => item.key === currentTab)))
@@ -5066,7 +5093,7 @@ function ApprovalDashboardNav({ setTab, currentTab, counts = {}, hideBeforeCurre
     <div className="card">
       <div className="card-content">
         <p className="small muted">Approval Dashboard</p>
-        <div className="grid grid-4" style={{ marginTop: 12 }}>
+        <div className="grid" style={{ marginTop: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
           {visibleItems.map(item => (
             <button
               key={item.key}
