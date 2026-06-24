@@ -772,6 +772,66 @@ function timesheetClaimToRow(claim) {
   };
 }
 
+function annualLeaveRowToRequest(row) {
+  const request = row.request || {};
+  return {
+    ...request,
+    id: row.id,
+    employeeId: row.employee_id,
+    status: row.status || request.status || 'Submitted',
+    syncedAt: row.updated_at
+  };
+}
+
+function annualLeaveRequestToRow(request) {
+  return {
+    id: request.id,
+    employee_id: request.employeeId,
+    status: request.status || 'Submitted',
+    request: {
+      ...request,
+      employeeId: request.employeeId
+    },
+    updated_at: new Date().toISOString()
+  };
+}
+
+function expenseRowToClaim(row) {
+  const claim = row.claim || {};
+  return {
+    ...claim,
+    id: row.id,
+    type: 'expense',
+    employeeId: row.employee_id,
+    expenseMonth: row.claim_month || claim.expenseMonth,
+    status: row.status || claim.status || 'Submitted',
+    syncedAt: row.updated_at
+  };
+}
+
+function expenseClaimForStorage(claim) {
+  return {
+    ...claim,
+    type: 'expense',
+    employeeId: claim.employeeId,
+    expenses: (claim.expenses || []).map(expense => ({
+      ...expense,
+      receiptPreview: expense.receiptPath ? '' : expense.receiptPreview
+    }))
+  };
+}
+
+function expenseClaimToRow(claim) {
+  return {
+    id: claim.id,
+    employee_id: claim.employeeId,
+    claim_month: getClaimExpenseMonth(claim),
+    status: claim.status || 'Submitted',
+    claim: expenseClaimForStorage(claim),
+    updated_at: new Date().toISOString()
+  };
+}
+
 function hasPasswordSetupParams() {
   if (typeof window === 'undefined') return false;
 
@@ -797,6 +857,7 @@ export default function App() {
   const [bankHolidayEvents, setBankHolidayEvents] = useState([]);
   const [bankHolidayError, setBankHolidayError] = useState('');
   const [timesheetSyncStatus, setTimesheetSyncStatus] = useState('');
+  const [dataSyncStatus, setDataSyncStatus] = useState('');
   const [tab, setTab] = useState('dashboard');
   const [entryHistoryView, setEntryHistoryView] = useState(null);
   const [activeUser, setActiveUser] = useState(employees[0]);
@@ -1018,6 +1079,93 @@ export default function App() {
     };
   }, [session?.user?.id, profile?.id, profileLoading, profileMissing, profileReloadKey]);
 
+  const addSignedReceiptUrls = async (claimList) => {
+    const claimsWithReceipts = await Promise.all((claimList || []).map(async (claim) => {
+      if (claimTypeOf(claim) !== 'expense') return claim;
+
+      const hydratedExpenses = await Promise.all((claim.expenses || []).map(async (expense) => {
+        if (!expense.receiptPath || expense.receiptPreview) return expense;
+
+        const { data, error } = await supabase
+          .storage
+          .from('receipt-proofs')
+          .createSignedUrl(expense.receiptPath, 60 * 60 * 24);
+
+        if (error) return expense;
+        return { ...expense, receiptPreview: data?.signedUrl || '' };
+      }));
+
+      return { ...claim, expenses: hydratedExpenses };
+    }));
+
+    return claimsWithReceipts;
+  };
+
+  useEffect(() => {
+    if (!session || profileLoading || profileMissing) return;
+
+    let cancelled = false;
+
+    const loadAnnualLeaveRequests = async () => {
+      const { data, error } = await supabase
+        .from('annual_leave_requests')
+        .select('id,employee_id,status,request,updated_at')
+        .order('updated_at', { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        setDataSyncStatus(`Annual leave sync warning: ${error.message}`);
+        return;
+      }
+
+      setLeaveRequests((data || []).map(annualLeaveRowToRequest));
+    };
+
+    loadAnnualLeaveRequests();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
+
+  useEffect(() => {
+    if (!session || profileLoading || profileMissing) return;
+
+    let cancelled = false;
+
+    const loadExpenseClaims = async () => {
+      const { data, error } = await supabase
+        .from('expense_claims')
+        .select('id,employee_id,claim_month,status,claim,updated_at')
+        .order('updated_at', { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        setDataSyncStatus(`Expense sync warning: ${error.message}`);
+        return;
+      }
+
+      const remoteExpenses = await addSignedReceiptUrls((data || []).map(expenseRowToClaim));
+      if (cancelled) return;
+
+      setClaims(prev => {
+        const localNonExpenses = prev.filter(claim => claimTypeOf(claim) !== 'expense');
+        return uniqueClaimsByEmployeeWeekType([...remoteExpenses, ...localNonExpenses]);
+      });
+      setDataSyncStatus(remoteExpenses.length
+        ? `Loaded ${remoteExpenses.length} expense claim(s) from Supabase.`
+        : 'Expenses are ready in Supabase.');
+    };
+
+    loadExpenseClaims();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
+
   useEffect(() => {
     if (!session || profileLoading || profileMissing) return;
 
@@ -1219,12 +1367,39 @@ export default function App() {
     );
   };
 
-  const uploadReceipt = (i, file) => {
+  const uploadReceipt = async (i, file) => {
     if (!file) return;
 
     setExpenseError('');
     updateExpense(i, 'receiptName', file.name);
     updateExpense(i, 'noPhotoProof', false);
+
+    if (isUuid(employeeInfo.employeeId)) {
+      const extension = String(file.name || '').match(/\.[a-z0-9]+$/i)?.[0] || '';
+      const path = `${employeeInfo.employeeId}/${crypto.randomUUID()}${extension}`;
+      const { error } = await supabase
+        .storage
+        .from('receipt-proofs')
+        .upload(path, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type || undefined
+        });
+
+      if (!error) {
+        const { data } = await supabase
+          .storage
+          .from('receipt-proofs')
+          .createSignedUrl(path, 60 * 60 * 24);
+
+        updateExpense(i, 'receiptPath', path);
+        updateExpense(i, 'receiptMimeType', file.type || '');
+        updateExpense(i, 'receiptPreview', data?.signedUrl || '');
+        return;
+      }
+
+      setExpenseError(`Receipt upload warning: ${error.message}`);
+    }
 
     const reader = new FileReader();
     reader.onload = () => updateExpense(i, 'receiptPreview', String(reader.result || ''));
@@ -1318,6 +1493,80 @@ export default function App() {
     await saveTimesheetClaimToSupabase(updatedClaim);
   };
 
+  const saveAnnualLeaveRequestToSupabase = async (request) => {
+    if (!request || !isUuid(request.employeeId)) {
+      const message = 'Annual leave sync skipped because this account is not linked to a Supabase profile id yet.';
+      setDataSyncStatus(message);
+      return { data: null, error: { message } };
+    }
+
+    const { data, error } = await supabase
+      .from('annual_leave_requests')
+      .upsert(annualLeaveRequestToRow(request), { onConflict: 'id' })
+      .select('id,employee_id,status,request,updated_at')
+      .single();
+
+    if (error) {
+      setDataSyncStatus(`Annual leave sync warning: ${error.message}`);
+      return { data: null, error };
+    }
+
+    setDataSyncStatus('Annual leave saved to Supabase.');
+    return { data: annualLeaveRowToRequest(data), error: null };
+  };
+
+  const deleteAnnualLeaveRequestFromSupabase = async (request) => {
+    if (!request?.id || !isUuid(request.employeeId)) return;
+
+    const { error } = await supabase
+      .from('annual_leave_requests')
+      .delete()
+      .eq('id', request.id);
+
+    if (error) {
+      setDataSyncStatus(`Annual leave sync warning: ${error.message}`);
+    }
+  };
+
+  const saveExpenseClaimToSupabase = async (claim) => {
+    if (!claim || claimTypeOf(claim) !== 'expense') return { data: null, error: null };
+
+    if (!isUuid(claim.employeeId)) {
+      const message = 'Expense sync skipped because this account is not linked to a Supabase profile id yet.';
+      setDataSyncStatus(message);
+      return { data: null, error: { message } };
+    }
+
+    const row = expenseClaimToRow(claim);
+    const { data, error } = await supabase
+      .from('expense_claims')
+      .upsert(row, { onConflict: 'employee_id,claim_month' })
+      .select('id,employee_id,claim_month,status,claim,updated_at')
+      .single();
+
+    if (error) {
+      setDataSyncStatus(`Expense sync warning: ${error.message}`);
+      return { data: null, error };
+    }
+
+    const [hydratedClaim] = await addSignedReceiptUrls([expenseRowToClaim(data)]);
+    setDataSyncStatus('Expense saved to Supabase.');
+    return { data: hydratedClaim, error: null };
+  };
+
+  const patchExpenseClaimInSupabase = async (claim, patch) => {
+    if (!claim || claimTypeOf(claim) !== 'expense') return;
+
+    const updatedClaim = {
+      ...claim,
+      ...patch,
+      status: patch.status || claim.status || 'Submitted',
+      updatedAt: new Date().toLocaleString('en-GB')
+    };
+
+    await saveExpenseClaimToSupabase(updatedClaim);
+  };
+
   const buildExpenseClaim = status => {
     const baseClaim = commonClaimFields(status);
     const applicationSubmittedAt = baseClaim.submittedAt || new Date().toLocaleString('en-GB');
@@ -1357,7 +1606,7 @@ export default function App() {
     setTab('dashboard');
   };
 
-  const submitExpense = () => {
+  const submitExpense = async () => {
     setExpenseError('');
 
     if (expensesMissingReceipts(expenses)) {
@@ -1369,6 +1618,7 @@ export default function App() {
     const { nextClaims, savedClaim } = upsertClaimInList(claims, newClaim);
 
     setClaims(nextClaims);
+    await saveExpenseClaimToSupabase(savedClaim);
     setExpenses(savedClaim.expenses || newClaim.expenses || [makeExpense()]);
     setEmployeeInfo(p => ({ ...p, notes: '' }));
     setEditingClaimId(savedClaim.id);
@@ -1382,6 +1632,10 @@ export default function App() {
 
     if (existingClaim && claimTypeOf(existingClaim) === 'timesheet') {
       patchTimesheetClaimInSupabase(existingClaim, patch);
+    }
+
+    if (existingClaim && claimTypeOf(existingClaim) === 'expense') {
+      patchExpenseClaimInSupabase(existingClaim, patch);
     }
   };
 
@@ -1503,6 +1757,8 @@ export default function App() {
 
     if (updatedType === 'timesheet') {
       await saveTimesheetClaimToSupabase(updatedClaim);
+    } else if (updatedType === 'expense') {
+      await saveExpenseClaimToSupabase(updatedClaim);
     }
 
     setEditingClaimId(null);
@@ -1616,7 +1872,7 @@ export default function App() {
     });
   };
 
-  const submitAnnualLeave = () => {
+  const submitAnnualLeave = async () => {
     setAlError('');
 
     if (!alForm.startDate || !alForm.endDate) {
@@ -1649,21 +1905,35 @@ export default function App() {
     };
 
     setLeaveRequests(prev => [newRequest, ...prev]);
+    await saveAnnualLeaveRequestToSupabase(newRequest);
     setAlForm({ startDate: '', endDate: '', duration: 'full', reason: '' });
   };
 
   const updateLeaveRequest = (id, patch) => {
+    const existingRequest = leaveRequests.find(request => request.id === id);
     setLeaveRequests(prev => prev.map(r => {
       if (r.id !== id) return r;
       if (r.status !== 'Submitted') return r;
       return { ...r, ...patch };
     }));
+
+    if (existingRequest && existingRequest.status === 'Submitted') {
+      saveAnnualLeaveRequestToSupabase({
+        ...existingRequest,
+        ...patch,
+        updatedAt: new Date().toLocaleString('en-GB')
+      });
+    }
   };
 
   const cancelLeaveRequest = (id) => {
+    const existingRequest = leaveRequests.find(request => request.id === id);
     setLeaveRequests(prev =>
       prev.filter(r => !(r.id === id && r.employeeId === activeUser.id && r.status === 'Submitted'))
     );
+    if (existingRequest?.employeeId === activeUser.id && existingRequest.status === 'Submitted') {
+      deleteAnnualLeaveRequestFromSupabase(existingRequest);
+    }
   };
 
   const selectAnnualLeaveDate = (date) => {
@@ -1867,6 +2137,14 @@ export default function App() {
           <div className="card">
             <div className="card-content small muted">
               {timesheetSyncStatus}
+            </div>
+          </div>
+        )}
+
+        {dataSyncStatus && (
+          <div className="card">
+            <div className="card-content small muted">
+              {dataSyncStatus}
             </div>
           </div>
         )}
