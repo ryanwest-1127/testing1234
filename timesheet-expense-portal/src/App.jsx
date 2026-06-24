@@ -12,6 +12,9 @@ import {
 import { supabase } from './supabaseClient';
 
 const STORAGE_KEY = 'timesheet-expense-saas-demo-v2';
+const BANK_HOLIDAY_CACHE_KEY = 'uk-bank-holidays-england-wales-v1';
+const UK_BANK_HOLIDAYS_URL = 'https://www.gov.uk/bank-holidays.json';
+const BANK_HOLIDAY_DIVISION = 'england-and-wales';
 
 const employees = [
   { id: 'EMP001', name: 'Ryan Hei', email: 'ryan@example.com', authEmail: 'employee.ryan@sazmedia.co.uk', role: 'Employee', department: 'Production' },
@@ -313,19 +316,51 @@ function getDatesBetween(startDate, endDate) {
   return dates;
 }
 
-function calculateLeaveDays(request) {
+function isWorkingDay(date) {
+  const day = date.getDay();
+  return day !== 0 && day !== 6;
+}
+
+function normalizeBankHolidayEvents(payload) {
+  const events = payload?.[BANK_HOLIDAY_DIVISION]?.events || [];
+  return events
+    .filter(event => event?.date)
+    .map(event => ({
+      date: event.date,
+      title: event.title || 'Bank holiday'
+    }));
+}
+
+function bankHolidayDateSetFromEvents(events = []) {
+  return new Set(events.map(event => event.date));
+}
+
+function bankHolidayForDate(events = [], dateKey) {
+  return events.find(event => event.date === dateKey) || null;
+}
+
+function calculateBankHolidayDeduction(events = [], year = new Date().getFullYear()) {
+  return events.filter(event => {
+    if (!String(event.date || '').startsWith(`${year}-`)) return false;
+    const date = new Date(event.date);
+    return !Number.isNaN(date.getTime()) && isWorkingDay(date);
+  }).length;
+}
+
+function calculateLeaveDays(request, bankHolidayDateSet = new Set(), leaveYear = null) {
   const dates = getDatesBetween(request.startDate, request.endDate);
   const workingDates = dates.filter(d => {
-    const day = d.getDay();
-    return day !== 0 && day !== 6;
+    const key = formatISODateLocal(d);
+    if (leaveYear && d.getFullYear() !== Number(leaveYear)) return false;
+    return isWorkingDay(d) && !bankHolidayDateSet.has(key);
   });
   return workingDates.length * (request.duration === 'half' ? 0.5 : 1);
 }
 
-function calculateApprovedLeaveDays(requests) {
+function calculateApprovedLeaveDays(requests, bankHolidayDateSet = new Set(), leaveYear = null) {
   return requests
     .filter(r => r.status === 'Approved')
-    .reduce((sum, r) => sum + calculateLeaveDays(r), 0);
+    .reduce((sum, r) => sum + calculateLeaveDays(r, bankHolidayDateSet, leaveYear), 0);
 }
 
 function formatISODateLocal(date) {
@@ -559,7 +594,15 @@ function expensesMissingReceipts(expenses) {
   return (expenses || []).some(expense => !expense.noPhotoProof && (!expense.receiptName || !expense.receiptPreview));
 }
 
-function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = [], annualLeaveAllowance = 28) {
+function getDashboardSummary(
+  claims,
+  selectedWeek,
+  weeklyStandardHours,
+  leaveRequests = [],
+  annualLeaveAllowance = 28,
+  bankHolidayEvents = [],
+  leaveYear = new Date().getFullYear()
+) {
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const timesheetClaims = cleanClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
   const expenseClaims = cleanClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
@@ -585,6 +628,10 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
 
   const outstandingExpenses = Math.max(0, totalExpenseClaims - approvedPaidExpenses);
   const pendingApproval = cleanClaims.filter(c => c.status === 'Submitted').length;
+  const bankHolidayDateSet = bankHolidayDateSetFromEvents(bankHolidayEvents);
+  const approvedLeaveUsed = calculateApprovedLeaveDays(leaveRequests, bankHolidayDateSet, leaveYear);
+  const bankHolidayDays = calculateBankHolidayDeduction(bankHolidayEvents, leaveYear);
+  const annualLeaveTotal = Number(annualLeaveAllowance || 28);
 
   return {
     totalWorkingHours,
@@ -594,8 +641,10 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
     approvedPaidExpenses,
     outstandingExpenses,
     pendingApproval,
-    annualLeaveRemaining: Math.max(0, Number(annualLeaveAllowance || 28) - calculateApprovedLeaveDays(leaveRequests)),
-    annualLeaveTotal: Number(annualLeaveAllowance || 28)
+    annualLeaveRemaining: Math.max(0, annualLeaveTotal - bankHolidayDays - approvedLeaveUsed),
+    annualLeaveTotal,
+    annualLeaveBankHolidays: bankHolidayDays,
+    annualLeaveApprovedUsed: approvedLeaveUsed
   };
 }
 
@@ -745,6 +794,8 @@ export default function App() {
   const [profileMissing, setProfileMissing] = useState(false);
   const [profileUsers, setProfileUsers] = useState([]);
   const [profileReloadKey, setProfileReloadKey] = useState(0);
+  const [bankHolidayEvents, setBankHolidayEvents] = useState([]);
+  const [bankHolidayError, setBankHolidayError] = useState('');
   const [timesheetSyncStatus, setTimesheetSyncStatus] = useState('');
   const [tab, setTab] = useState('dashboard');
   const [entryHistoryView, setEntryHistoryView] = useState(null);
@@ -814,6 +865,40 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ claims, leaveRequests }));
   }, [claims, leaveRequests]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadBankHolidays = async () => {
+      try {
+        const cached = JSON.parse(localStorage.getItem(BANK_HOLIDAY_CACHE_KEY) || '[]');
+        if (Array.isArray(cached) && cached.length) {
+          setBankHolidayEvents(cached);
+        }
+      } catch {}
+
+      try {
+        const response = await fetch(UK_BANK_HOLIDAYS_URL);
+        if (!response.ok) throw new Error(`Unable to load UK bank holidays (${response.status})`);
+        const payload = await response.json();
+        const events = normalizeBankHolidayEvents(payload);
+        if (cancelled) return;
+        setBankHolidayEvents(events);
+        setBankHolidayError('');
+        localStorage.setItem(BANK_HOLIDAY_CACHE_KEY, JSON.stringify(events));
+      } catch (error) {
+        if (!cancelled) {
+          setBankHolidayError(error.message || 'Unable to load UK bank holidays.');
+        }
+      }
+    };
+
+    loadBankHolidays();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!session) {
@@ -984,6 +1069,11 @@ export default function App() {
     employees.find(employee => employee.id === employeeId) ||
     activeUser;
   const annualLeaveAllowanceFor = (employeeId) => Number(findPortalEmployee(employeeId)?.annualLeaveAllowance || 28);
+  const bankHolidayDateSet = useMemo(
+    () => bankHolidayDateSetFromEvents(bankHolidayEvents),
+    [bankHolidayEvents]
+  );
+  const currentLeaveYear = new Date().getFullYear();
 
   const accountClaims =
     activeUser.role === 'Manager' && managerDataMode === 'overall'
@@ -1006,22 +1096,22 @@ export default function App() {
       : accountLeaveRequests;
 
   const dashboardSummary = useMemo(
-    () => getDashboardSummary(visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests, annualLeaveAllowanceFor(viewEmployeeId === 'All' ? activeUser.id : viewEmployeeId)),
-    [visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests, viewEmployeeId, activeUser.id, profileUsers]
+    () => getDashboardSummary(visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests, annualLeaveAllowanceFor(viewEmployeeId === 'All' ? activeUser.id : viewEmployeeId), bankHolidayEvents, currentLeaveYear),
+    [visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests, viewEmployeeId, activeUser.id, profileUsers, bankHolidayEvents, currentLeaveYear]
   );
 
   const topCardClaims = cleanClaims.filter(c => c.employeeId === activeUser.id);
   const topCardLeaveRequests = leaveRequests.filter(r => r.employeeId === activeUser.id);
 
   const topCardSummary = useMemo(
-    () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, annualLeaveAllowanceFor(activeUser.id)),
-    [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, activeUser.id, profileUsers]
+    () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, annualLeaveAllowanceFor(activeUser.id), bankHolidayEvents, currentLeaveYear),
+    [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, activeUser.id, profileUsers, bankHolidayEvents, currentLeaveYear]
   );
   const companyTopCardClaims = cleanClaims.filter(c => employees.some(employee => employee.role !== 'Manager' && employee.id === c.employeeId));
   const companyTopCardLeaveRequests = leaveRequests.filter(r => employees.some(employee => employee.role !== 'Manager' && employee.id === r.employeeId));
   const companyTopCardSummary = useMemo(
-    () => getDashboardSummary(companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests),
-    [companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests]
+    () => getDashboardSummary(companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests, 28, bankHolidayEvents, currentLeaveYear),
+    [companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests, bankHolidayEvents, currentLeaveYear]
   );
   const companyAlSubmitted = companyTopCardLeaveRequests.filter(request => request.status === 'Submitted').length;
   const companyAlApproved = companyTopCardLeaveRequests.filter(request => request.status === 'Approved').length;
@@ -1501,16 +1591,18 @@ export default function App() {
         ? leaveRequests
         : leaveRequests.filter(r => r.employeeId === activeUser.id);
 
-  const approvedLeaveUsed = calculateApprovedLeaveDays(visibleLeaveRequests);
+  const [alYear, alMonthNumber] = alMonth.split('-').map(Number);
+  const approvedLeaveUsed = calculateApprovedLeaveDays(visibleLeaveRequests, bankHolidayDateSet, alYear);
+  const bankHolidayDeduction = calculateBankHolidayDeduction(bankHolidayEvents, alYear);
 
   const annualLeaveTotal = annualLeaveAllowanceFor(activeUser.id);
-  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedLeaveUsed);
+  const annualLeaveRemaining = Math.max(0, annualLeaveTotal - bankHolidayDeduction - approvedLeaveUsed);
 
   const leaveRequestDateKeys = (request) =>
     getDatesBetween(request.startDate, request.endDate)
       .filter(d => {
-        const day = d.getDay();
-        return day !== 0 && day !== 6;
+        const key = formatISODateLocal(d);
+        return isWorkingDay(d) && !bankHolidayDateSet.has(key);
       })
       .map(d => formatISODateLocal(d));
 
@@ -1537,8 +1629,8 @@ export default function App() {
       return;
     }
 
-    if (calculateLeaveDays(alForm) <= 0) {
-      setAlError('Annual leave must include at least one weekday.');
+    if (calculateLeaveDays(alForm, bankHolidayDateSet, alYear) <= 0) {
+      setAlError('Annual leave must include at least one working day that is not a bank holiday.');
       return;
     }
 
@@ -1576,6 +1668,10 @@ export default function App() {
 
   const selectAnnualLeaveDate = (date) => {
     const key = formatISODateLocal(date);
+    if (bankHolidayDateSet.has(key)) {
+      setAlError('This date is a bank holiday and will not be deducted from annual leave.');
+      return;
+    }
     setAlError('');
     setAlForm(prev => {
       if (!prev.startDate || (prev.startDate && prev.endDate)) {
@@ -1590,7 +1686,6 @@ export default function App() {
     });
   };
 
-  const [alYear, alMonthNumber] = alMonth.split('-').map(Number);
   const alMonthStart = new Date(alYear, alMonthNumber - 1, 1);
   const alMonthEnd = new Date(alYear, alMonthNumber, 0);
   const alFirstDay = alMonthStart.getDay() || 7;
@@ -1882,6 +1977,8 @@ export default function App() {
             setAlMonth={setAlMonth}
             setHighlightedLeaveId={setHighlightedLeaveId}
             reloadProfiles={() => setProfileReloadKey(key => key + 1)}
+            bankHolidayEvents={bankHolidayEvents}
+            leaveYear={currentLeaveYear}
           />
         )}
 
@@ -2033,6 +2130,7 @@ export default function App() {
               leaveRequests={visibleLeaveRequests}
               employees={employees}
               profileUsers={profileUsers}
+              bankHolidayEvents={bankHolidayEvents}
               updateLeaveRequest={updateLeaveRequest}
               closeAdmin={() => setTab('dashboard')}
               setTab={setTab}
@@ -2059,6 +2157,10 @@ export default function App() {
                       ? 'Admin view for company annual leave applications.'
                       : 'Click a date to apply AL. Manager approval deducts from Annual Leave Remaining.'}
                   </p>
+                  <p className="xsmall muted">
+                    UK bank holidays are loaded automatically from GOV.UK England and Wales data.
+                    {bankHolidayError ? ` ${bankHolidayError}` : ''}
+                  </p>
                 </div>
               </div>
             </div>
@@ -2066,7 +2168,7 @@ export default function App() {
             <div className="grid grid-3">
               <Insight title="Annual Leave Remaining" value={`${annualLeaveRemaining} / ${annualLeaveTotal} days`} note="Approved AL deducted" icon={<CalendarDays />} />
               <Insight title="Pending AL" value={String(visibleLeaveRequests.filter(r => r.status === 'Submitted').length)} note="Waiting for approval" icon={<Clock />} />
-              <Insight title="Approved AL Used" value={`${approvedLeaveUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
+              <Insight title="Approved AL Used" value={`${approvedLeaveUsed} days`} note={`Bank holidays deducted: ${bankHolidayDeduction}`} icon={<CheckCircle2 />} />
             </div>
 
             <div className="grid grid-2-1">
@@ -2078,6 +2180,7 @@ export default function App() {
                 leaveRequestsForDate={leaveRequestsForDate}
                 alForm={alForm}
                 selectAnnualLeaveDate={selectAnnualLeaveDate}
+                bankHolidayEvents={bankHolidayEvents}
               />
 
               {!(activeUser.role === 'Manager' && managerDataMode === 'overall') && (
@@ -2109,8 +2212,8 @@ export default function App() {
 
                   <div className="card-dark" style={{ padding: 16 }}>
                     <p className="small">Selected AL Days</p>
-                    <h2>{calculateLeaveDays(alForm)} day(s)</h2>
-                    <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Submitted AL is deducted only after approval.</p>
+                    <h2>{calculateLeaveDays(alForm, bankHolidayDateSet, alYear)} day(s)</h2>
+                    <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends and UK bank holidays are not deducted. Submitted AL is deducted only after approval.</p>
                   </div>
 
                   <button className="btn" onClick={submitAnnualLeave}>Submit Annual Leave</button>
@@ -2156,7 +2259,7 @@ export default function App() {
                             <td>{r.employeeName}</td>
                             <td>{r.startDate} → {r.endDate}</td>
                             <td>{r.duration === 'half' ? 'Half day' : 'Full day'}</td>
-                            <td>{calculateLeaveDays(r)}</td>
+                            <td>{calculateLeaveDays(r, bankHolidayDateSet)}</td>
                             <td><span className={`badge ${r.status}`}>{r.status}</span></td>
                             <td>
                               {r.reason || '—'}
@@ -2682,7 +2785,9 @@ function Dashboard({
   setTab,
   setAlMonth,
   setHighlightedLeaveId,
-  reloadProfiles
+  reloadProfiles,
+  bankHolidayEvents = [],
+  leaveYear = new Date().getFullYear()
 }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
   const [dashboardExpensePeriodType, setDashboardExpensePeriodType] = useState('month');
@@ -2749,7 +2854,7 @@ function Dashboard({
     .filter(employee => employee.role !== 'Manager');
   const employeeIds = new Set(employeeDirectory.map(employee => employee.id));
   const managerPersonalSummary = isManager
-    ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests, activeUser.annualLeaveAllowance || 28)
+    ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests, activeUser.annualLeaveAllowance || 28, bankHolidayEvents, leaveYear)
     : null;
   const managerPersonalChartData = managerPersonalSummary
     ? [
@@ -2817,13 +2922,14 @@ function Dashboard({
   ).sort((a, b) => b.value - a.value);
   const expensePieColors = ['#2563eb', '#16a34a', '#eab308', '#dc2626', '#7c3aed', '#0891b2', '#f97316', '#64748b'];
   const companyReceiptItems = receiptDownloadItemsFromClaims(companyExpenseClaims);
+  const dashboardBankHolidayDateSet = bankHolidayDateSetFromEvents(bankHolidayEvents);
 
   const bossEmployeeSummaries = isManager
     ? employeeDirectory
         .map(employee => {
           const employeeClaims = (allEmployeeClaims || []).filter(claim => claim.employeeId === employee.id);
           const employeeLeaveRequests = (allLeaveRequests || []).filter(request => request.employeeId === employee.id);
-          const summary = getDashboardSummary(employeeClaims, selectedWeek, weeklyStandardHours, employeeLeaveRequests, employee.annualLeaveAllowance || 28);
+          const summary = getDashboardSummary(employeeClaims, selectedWeek, weeklyStandardHours, employeeLeaveRequests, employee.annualLeaveAllowance || 28, bankHolidayEvents, leaveYear);
 
           return {
             ...employee,
@@ -2863,7 +2969,7 @@ function Dashboard({
             type: 'Annual Leave',
             claimType: 'annualLeave',
             period: `${request.startDate} -> ${request.endDate}`,
-            summary: `${calculateLeaveDays(request)} day(s)`,
+            summary: `${calculateLeaveDays(request, dashboardBankHolidayDateSet)} day(s)`,
             source: 'leave'
           }))
       ]
@@ -2919,7 +3025,7 @@ function Dashboard({
           claimType: 'annualLeave',
           period: `${request.startDate} -> ${request.endDate}`,
           status: request.status,
-          summary: `${calculateLeaveDays(request)} day(s)`,
+          summary: `${calculateLeaveDays(request, dashboardBankHolidayDateSet)} day(s)`,
           source: 'leave'
         }))
       ].sort((a, b) => String(b.period || '').localeCompare(String(a.period || '')))
@@ -4714,7 +4820,8 @@ function ManagerAnnualLeaveAdmin({
   alBlanks,
   alDays,
   leaveRequestsForDate,
-  highlightedLeaveId
+  highlightedLeaveId,
+  bankHolidayEvents = []
 }) {
   const [searchText, setSearchText] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -4750,10 +4857,13 @@ function ManagerAnnualLeaveAdmin({
   const selectedEmployeeSelectedRequest = selectedEmployeeDisplayRequests.find(request => request.id === selectedRequestId) ||
     selectedEmployeeDisplayRequests[0] ||
     null;
-  const selectedEmployeeApprovedUsed = calculateApprovedLeaveDays(selectedEmployeeAllRequests);
+  const managerAlYear = Number(String(alMonth || '').slice(0, 4)) || new Date().getFullYear();
+  const managerBankHolidayDateSet = bankHolidayDateSetFromEvents(bankHolidayEvents);
+  const selectedEmployeeApprovedUsed = calculateApprovedLeaveDays(selectedEmployeeAllRequests, managerBankHolidayDateSet, managerAlYear);
+  const selectedEmployeeBankHolidayDeduction = calculateBankHolidayDeduction(bankHolidayEvents, managerAlYear);
   const selectedEmployeePending = selectedEmployeeAllRequests.filter(request => request.status === 'Submitted').length;
   const selectedEmployeeAllowance = Number(selectedEmployee?.annualLeaveAllowance || 28);
-  const selectedEmployeeRemaining = Math.max(0, selectedEmployeeAllowance - selectedEmployeeApprovedUsed);
+  const selectedEmployeeRemaining = Math.max(0, selectedEmployeeAllowance - selectedEmployeeBankHolidayDeduction - selectedEmployeeApprovedUsed);
 
   const employeeRows = employeeDirectory
     .map(employee => {
@@ -4849,7 +4959,7 @@ function ManagerAnnualLeaveAdmin({
           <div className="grid grid-3">
             <Insight title="Annual Leave Remaining" value={`${selectedEmployeeRemaining} / ${selectedEmployeeAllowance} days`} note="Approved AL deducted" icon={<CalendarDays />} />
             <Insight title="Pending AL" value={String(selectedEmployeePending)} note="Waiting for approval" icon={<Clock />} />
-            <Insight title="Approved AL Used" value={`${selectedEmployeeApprovedUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
+            <Insight title="Approved AL Used" value={`${selectedEmployeeApprovedUsed} days`} note={`Bank holidays deducted: ${selectedEmployeeBankHolidayDeduction}`} icon={<CheckCircle2 />} />
           </div>
 
           <div className="grid grid-2-1">
@@ -4859,6 +4969,7 @@ function ManagerAnnualLeaveAdmin({
               alBlanks={alBlanks}
               alDays={alDays}
               leaveRequestsForDate={(day) => leaveRequestsForDate(day).filter(request => request.employeeId === selectedEmployeeId)}
+              bankHolidayEvents={bankHolidayEvents}
               readOnly
             />
 
@@ -4868,6 +4979,7 @@ function ManagerAnnualLeaveAdmin({
               selectedRequestId={selectedRequestId}
               setSelectedRequestId={setSelectedRequestId}
               updateLeaveRequest={updateLeaveRequest}
+              bankHolidayDateSet={managerBankHolidayDateSet}
             />
           </div>
 
@@ -4918,7 +5030,7 @@ function ManagerAnnualLeaveAdmin({
   );
 }
 
-function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveRequestsForDate, readOnly = false, alForm = {}, selectAnnualLeaveDate }) {
+function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveRequestsForDate, readOnly = false, alForm = {}, selectAnnualLeaveDate, bankHolidayEvents = [] }) {
   const changeMonth = (delta) => {
     const [year, month] = alMonth.split('-').map(Number);
     const next = new Date(year, month - 1 + delta, 1);
@@ -4966,7 +5078,9 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
 
             const key = formatISODateLocal(day);
             const items = leaveRequestsForDate(day);
+            const bankHoliday = bankHolidayForDate(bankHolidayEvents, key);
             const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+            const isBankHoliday = Boolean(bankHoliday);
             const isSelected = alForm.startDate && (
               alForm.endDate
                 ? key >= alForm.startDate && key <= alForm.endDate
@@ -4978,7 +5092,7 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
                 type="button"
                 key={key}
                 onClick={() => {
-                  if (!readOnly && selectAnnualLeaveDate) selectAnnualLeaveDate(day);
+                  if (!readOnly && !isBankHoliday && selectAnnualLeaveDate) selectAnnualLeaveDate(day);
                 }}
                 style={{
                   minHeight: 92,
@@ -4986,11 +5100,12 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
                   padding: 8,
                   borderRadius: 14,
                   border: '1px solid ' + (isSelected ? '#2563eb' : '#e2e8f0'),
-                  background: isSelected ? '#dbeafe' : isWeekend ? '#f1f5f9' : '#ffffff',
-                  cursor: readOnly ? 'default' : 'pointer'
+                  background: isSelected ? '#dbeafe' : isBankHoliday ? '#fef3c7' : isWeekend ? '#f1f5f9' : '#ffffff',
+                  cursor: readOnly || isBankHoliday ? 'default' : 'pointer'
                 }}
               >
                 <b>{day.getDate()}</b>
+                {isBankHoliday && <div className="xsmall" style={{ color: '#92400e' }}>{bankHoliday.title}</div>}
                 {isWeekend && <div className="xsmall muted">Weekend</div>}
                 <div className="space-y-sm" style={{ marginTop: 6 }}>
                   {items.slice(0, 2).map(item => (
@@ -5011,7 +5126,7 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
   );
 }
 
-function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSelectedRequestId, updateLeaveRequest }) {
+function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSelectedRequestId, updateLeaveRequest, bankHolidayDateSet = new Set() }) {
   const [note, setNote] = useState('');
   const selectedIndex = Math.max(0, requests.findIndex(item => item.id === selectedRequestId));
   const canMovePrevious = requests.length > 1 && selectedIndex > 0;
@@ -5049,8 +5164,8 @@ function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSel
           <>
             <div className="card-dark" style={{ padding: 16 }}>
               <p className="small">Selected AL Days</p>
-              <h2>{calculateLeaveDays(request)} day(s)</h2>
-              <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends are not deducted. Submitted AL is deducted only after approval.</p>
+              <h2>{calculateLeaveDays(request, bankHolidayDateSet)} day(s)</h2>
+              <p className="xsmall" style={{ color: '#cbd5e1' }}>Weekends and UK bank holidays are not deducted. Submitted AL is deducted only after approval.</p>
             </div>
 
             <ReadOnlyField label="Employee" value={request.employeeName || ''} />
@@ -5093,7 +5208,7 @@ function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSel
   );
 }
 
-function AnnualLeaveRequestTable({ requests, updateLeaveRequest, highlightedLeaveId, manager = false, canEmployeeCancel, cancelLeaveRequest }) {
+function AnnualLeaveRequestTable({ requests, updateLeaveRequest, highlightedLeaveId, manager = false, canEmployeeCancel, cancelLeaveRequest, bankHolidayDateSet = new Set() }) {
   const [notes, setNotes] = useState({});
 
   if (!requests.length) {
@@ -5137,7 +5252,7 @@ function AnnualLeaveRequestTable({ requests, updateLeaveRequest, highlightedLeav
                     <td>{request.employeeName}</td>
                     <td>{request.startDate} {'->'} {request.endDate}</td>
                     <td>{request.duration === 'half' ? 'Half day' : 'Full day'}</td>
-                    <td>{calculateLeaveDays(request)}</td>
+                    <td>{calculateLeaveDays(request, bankHolidayDateSet)}</td>
                     <td><span className={`badge al-status ${request.status}`}>{request.status}</span></td>
                     <td>
                       {request.reason || '—'}
