@@ -559,7 +559,7 @@ function expensesMissingReceipts(expenses) {
   return (expenses || []).some(expense => !expense.noPhotoProof && (!expense.receiptName || !expense.receiptPreview));
 }
 
-function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = []) {
+function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveRequests = [], annualLeaveAllowance = 28) {
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const timesheetClaims = cleanClaims.filter(c => c.type === 'timesheet' || (!c.type && c.timesheet));
   const expenseClaims = cleanClaims.filter(c => c.type === 'expense' || (!c.type && c.expenses));
@@ -594,8 +594,8 @@ function getDashboardSummary(claims, selectedWeek, weeklyStandardHours, leaveReq
     approvedPaidExpenses,
     outstandingExpenses,
     pendingApproval,
-    annualLeaveRemaining: Math.max(0, 28 - calculateApprovedLeaveDays(leaveRequests)),
-    annualLeaveTotal: 28
+    annualLeaveRemaining: Math.max(0, Number(annualLeaveAllowance || 28) - calculateApprovedLeaveDays(leaveRequests)),
+    annualLeaveTotal: Number(annualLeaveAllowance || 28)
   };
 }
 
@@ -744,6 +744,7 @@ export default function App() {
   const [profileError, setProfileError] = useState('');
   const [profileMissing, setProfileMissing] = useState(false);
   const [profileUsers, setProfileUsers] = useState([]);
+  const [profileReloadKey, setProfileReloadKey] = useState(0);
   const [timesheetSyncStatus, setTimesheetSyncStatus] = useState('');
   const [tab, setTab] = useState('dashboard');
   const [entryHistoryView, setEntryHistoryView] = useState(null);
@@ -928,7 +929,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing, profileReloadKey]);
 
   useEffect(() => {
     if (!session || profileLoading || profileMissing) return;
@@ -980,6 +981,7 @@ export default function App() {
     portalEmployees.find(employee => employee.id === employeeId) ||
     employees.find(employee => employee.id === employeeId) ||
     activeUser;
+  const annualLeaveAllowanceFor = (employeeId) => Number(findPortalEmployee(employeeId)?.annualLeaveAllowance || 28);
 
   const accountClaims =
     activeUser.role === 'Manager' && managerDataMode === 'overall'
@@ -1002,16 +1004,16 @@ export default function App() {
       : accountLeaveRequests;
 
   const dashboardSummary = useMemo(
-    () => getDashboardSummary(visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests),
-    [visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests]
+    () => getDashboardSummary(visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests, annualLeaveAllowanceFor(viewEmployeeId === 'All' ? activeUser.id : viewEmployeeId)),
+    [visibleClaims, selectedWeek, weeklyStandardHours, summaryLeaveRequests, viewEmployeeId, activeUser.id, profileUsers]
   );
 
   const topCardClaims = cleanClaims.filter(c => c.employeeId === activeUser.id);
   const topCardLeaveRequests = leaveRequests.filter(r => r.employeeId === activeUser.id);
 
   const topCardSummary = useMemo(
-    () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests),
-    [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests]
+    () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, annualLeaveAllowanceFor(activeUser.id)),
+    [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, activeUser.id, profileUsers]
   );
   const companyTopCardClaims = cleanClaims.filter(c => employees.some(employee => employee.role !== 'Manager' && employee.id === c.employeeId));
   const companyTopCardLeaveRequests = leaveRequests.filter(r => employees.some(employee => employee.role !== 'Manager' && employee.id === r.employeeId));
@@ -1497,7 +1499,7 @@ export default function App() {
 
   const approvedLeaveUsed = calculateApprovedLeaveDays(visibleLeaveRequests);
 
-  const annualLeaveTotal = 28;
+  const annualLeaveTotal = annualLeaveAllowanceFor(activeUser.id);
   const annualLeaveRemaining = Math.max(0, annualLeaveTotal - approvedLeaveUsed);
 
   const leaveRequestDateKeys = (request) =>
@@ -1875,6 +1877,7 @@ export default function App() {
             setTab={setTab}
             setAlMonth={setAlMonth}
             setHighlightedLeaveId={setHighlightedLeaveId}
+            reloadProfiles={() => setProfileReloadKey(key => key + 1)}
           />
         )}
 
@@ -2025,6 +2028,7 @@ export default function App() {
             <ManagerAnnualLeaveAdmin
               leaveRequests={visibleLeaveRequests}
               employees={employees}
+              profileUsers={profileUsers}
               updateLeaveRequest={updateLeaveRequest}
               closeAdmin={() => setTab('dashboard')}
               setTab={setTab}
@@ -2423,7 +2427,7 @@ function ProfileSetupNotice({ email, signOut }) {
 
 
 
-function EmployeeAccountsPanel() {
+function EmployeeAccountsPanel({ onProfilesChanged }) {
   const [profiles, setProfiles] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(true);
@@ -2514,6 +2518,7 @@ function EmployeeAccountsPanel() {
     }));
     setMessage('Employee profile saved.');
     setSavingId('');
+    onProfilesChanged?.();
   };
 
   return (
@@ -2672,7 +2677,8 @@ function Dashboard({
   openClaimForReview,
   setTab,
   setAlMonth,
-  setHighlightedLeaveId
+  setHighlightedLeaveId,
+  reloadProfiles
 }) {
   const [dashboardWeek, setDashboardWeek] = useState('current');
   const [dashboardExpensePeriodType, setDashboardExpensePeriodType] = useState('month');
@@ -2739,7 +2745,7 @@ function Dashboard({
     .filter(employee => employee.role !== 'Manager');
   const employeeIds = new Set(employeeDirectory.map(employee => employee.id));
   const managerPersonalSummary = isManager
-    ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests)
+    ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests, activeUser.annualLeaveAllowance || 28)
     : null;
   const managerPersonalChartData = managerPersonalSummary
     ? [
@@ -2813,7 +2819,7 @@ function Dashboard({
         .map(employee => {
           const employeeClaims = (allEmployeeClaims || []).filter(claim => claim.employeeId === employee.id);
           const employeeLeaveRequests = (allLeaveRequests || []).filter(request => request.employeeId === employee.id);
-          const summary = getDashboardSummary(employeeClaims, selectedWeek, weeklyStandardHours, employeeLeaveRequests);
+          const summary = getDashboardSummary(employeeClaims, selectedWeek, weeklyStandardHours, employeeLeaveRequests, employee.annualLeaveAllowance || 28);
 
           return {
             ...employee,
@@ -3106,7 +3112,7 @@ function Dashboard({
         </div>
       )}
 
-      {isManagerOverallDashboard && <EmployeeAccountsPanel />}
+      {isManagerOverallDashboard && <EmployeeAccountsPanel onProfilesChanged={reloadProfiles} />}
 
       {isManagerOverallDashboard && (
         <div className="card">
@@ -4694,6 +4700,7 @@ function ApprovalDashboardNav({ setTab, currentTab, counts = {}, hideBeforeCurre
 function ManagerAnnualLeaveAdmin({
   leaveRequests,
   employees,
+  profileUsers = [],
   updateLeaveRequest,
   closeAdmin,
   setTab,
@@ -4723,7 +4730,9 @@ function ManagerAnnualLeaveAdmin({
   };
 
   const pendingRequests = leaveRequests.filter(request => request.status === 'Submitted');
-  const selectedEmployee = employees.find(employee => employee.id === selectedEmployeeId);
+  const employeeDirectory = (profileUsers.length ? profileUsers : employees)
+    .filter(employee => employee.role !== 'Manager');
+  const selectedEmployee = employeeDirectory.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeAllRequests = selectedEmployeeId
     ? leaveRequests.filter(request => request.employeeId === selectedEmployeeId)
     : [];
@@ -4739,10 +4748,10 @@ function ManagerAnnualLeaveAdmin({
     null;
   const selectedEmployeeApprovedUsed = calculateApprovedLeaveDays(selectedEmployeeAllRequests);
   const selectedEmployeePending = selectedEmployeeAllRequests.filter(request => request.status === 'Submitted').length;
-  const selectedEmployeeRemaining = Math.max(0, 28 - selectedEmployeeApprovedUsed);
+  const selectedEmployeeAllowance = Number(selectedEmployee?.annualLeaveAllowance || 28);
+  const selectedEmployeeRemaining = Math.max(0, selectedEmployeeAllowance - selectedEmployeeApprovedUsed);
 
-  const employeeRows = employees
-    .filter(employee => employee.role !== 'Manager')
+  const employeeRows = employeeDirectory
     .map(employee => {
       const employeeRequests = leaveRequests.filter(request => employee.id === request.employeeId);
       return {
@@ -4834,7 +4843,7 @@ function ManagerAnnualLeaveAdmin({
           </div>
 
           <div className="grid grid-3">
-            <Insight title="Annual Leave Remaining" value={`${selectedEmployeeRemaining} / 28 days`} note="Approved AL deducted" icon={<CalendarDays />} />
+            <Insight title="Annual Leave Remaining" value={`${selectedEmployeeRemaining} / ${selectedEmployeeAllowance} days`} note="Approved AL deducted" icon={<CalendarDays />} />
             <Insight title="Pending AL" value={String(selectedEmployeePending)} note="Waiting for approval" icon={<Clock />} />
             <Insight title="Approved AL Used" value={`${selectedEmployeeApprovedUsed} days`} note="Approved requests only" icon={<CheckCircle2 />} />
           </div>
