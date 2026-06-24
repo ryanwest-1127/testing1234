@@ -730,6 +730,27 @@ function userFromProfile(profile, session) {
   };
 }
 
+function directoryFromProfilesAndRecords(baseUsers = [], records = [], excludeId = '') {
+  const usersFromRecords = (records || [])
+    .filter(record => record.employeeId && record.employeeId !== excludeId)
+    .map(record => ({
+      id: record.employeeId,
+      name: record.employeeName || record.email || 'Unknown Employee',
+      email: record.email || '',
+      authEmail: record.email || '',
+      department: record.department || 'Production',
+      role: 'Employee'
+    }));
+
+  return Object.values([...(baseUsers || []), ...usersFromRecords]
+    .filter(user => user?.id && user.id !== excludeId)
+    .reduce((groups, user) => {
+      groups[user.id] = groups[user.id] || user;
+      return groups;
+    }, {}))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
 }
@@ -866,9 +887,9 @@ export default function App() {
   const [selectedExpenseMonth, setSelectedExpenseMonth] = useState(currentMonthValue());
 
   const [employeeInfo, setEmployeeInfo] = useState({
-    employeeId: 'EMP001',
-    employeeName: 'Ryan Hei',
-    email: 'ryan@example.com',
+    employeeId: '',
+    employeeName: '',
+    email: '',
     notes: ''
   });
 
@@ -1028,7 +1049,7 @@ export default function App() {
 
   useEffect(() => {
     const defaultEmployee = activeUser.role === 'Manager' && managerDataMode === 'overall'
-      ? portalEmployees.find(e => e.role !== 'Manager') || activeUser
+      ? portalEmployees.find(e => e.id !== activeUser.id) || activeUser
       : activeUser;
 
     if (activeUser.role === 'Manager') {
@@ -1219,22 +1240,10 @@ export default function App() {
 
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const portalEmployees = profileUsers.length ? profileUsers : employees;
-  const profileCompanyUsers = profileUsers.length
-    ? portalEmployees.filter(employee => employee.id !== activeUser.id)
+  const baseCompanyUsers = profileUsers.length
+    ? portalEmployees
     : portalEmployees.filter(employee => employee.role !== 'Manager');
-  const claimCompanyUsers = cleanClaims
-    .filter(claim => claim.employeeId && claim.employeeId !== activeUser.id)
-    .map(claim => ({
-      id: claim.employeeId,
-      name: claim.employeeName || claim.email || 'Unknown Employee',
-      email: claim.email || '',
-      department: claim.department || 'Production',
-      role: 'Employee'
-    }));
-  const companyEmployees = Object.values([...profileCompanyUsers, ...claimCompanyUsers].reduce((groups, employee) => {
-    groups[employee.id] = groups[employee.id] || employee;
-    return groups;
-  }, {}));
+  const companyEmployees = directoryFromProfilesAndRecords(baseCompanyUsers, [...cleanClaims, ...leaveRequests], activeUser.id);
   const companyEmployeeIds = new Set(companyEmployees.map(employee => employee.id));
   const findPortalEmployee = (employeeId) =>
     portalEmployees.find(employee => employee.id === employeeId) ||
@@ -1247,9 +1256,12 @@ export default function App() {
   );
   const currentLeaveYear = new Date().getFullYear();
 
+  const companyClaims = cleanClaims.filter(c => companyEmployeeIds.has(c.employeeId));
+  const companyLeaveRequests = leaveRequests.filter(r => companyEmployeeIds.has(r.employeeId));
+
   const accountClaims =
     activeUser.role === 'Manager' && managerDataMode === 'overall'
-      ? cleanClaims
+      ? companyClaims
       : cleanClaims.filter(c => c.employeeId === activeUser.id);
 
   const visibleClaims =
@@ -1259,7 +1271,7 @@ export default function App() {
 
   const accountLeaveRequests =
     activeUser.role === 'Manager' && managerDataMode === 'overall'
-      ? leaveRequests
+      ? companyLeaveRequests
       : leaveRequests.filter(r => r.employeeId === activeUser.id);
 
   const summaryLeaveRequests =
@@ -1279,8 +1291,8 @@ export default function App() {
     () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, annualLeaveAllowanceFor(activeUser.id), bankHolidayEvents, currentLeaveYear),
     [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, activeUser.id, profileUsers, bankHolidayEvents, currentLeaveYear]
   );
-  const companyTopCardClaims = cleanClaims.filter(c => companyEmployeeIds.has(c.employeeId));
-  const companyTopCardLeaveRequests = leaveRequests.filter(r => companyEmployeeIds.has(r.employeeId));
+  const companyTopCardClaims = companyClaims;
+  const companyTopCardLeaveRequests = companyLeaveRequests;
   const companyTopCardSummary = useMemo(
     () => getDashboardSummary(companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests, 28, bankHolidayEvents, currentLeaveYear),
     [companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests, bankHolidayEvents, currentLeaveYear]
@@ -1867,9 +1879,9 @@ export default function App() {
 
   const visibleLeaveRequests =
     activeUser.role === 'Manager' && managerDataMode === 'overall' && viewEmployeeId !== 'All'
-      ? leaveRequests.filter(r => r.employeeId === viewEmployeeId)
+      ? accountLeaveRequests.filter(r => r.employeeId === viewEmployeeId)
       : activeUser.role === 'Manager' && managerDataMode === 'overall'
-        ? leaveRequests
+        ? accountLeaveRequests
         : leaveRequests.filter(r => r.employeeId === activeUser.id);
 
   const [alYear, alMonthNumber] = alMonth.split('-').map(Number);
@@ -2300,8 +2312,8 @@ export default function App() {
               title="Timesheet Admin"
               note="Review and approve employee timesheet applications."
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet')}
-              employees={employees}
-              profileUsers={profileUsers}
+              employees={companyEmployees}
+              profileUsers={companyEmployees}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => openTab('dashboard')}
@@ -2372,8 +2384,8 @@ export default function App() {
               title="Expense Admin"
               note="Review expense claims and download all uploaded receipt proof."
               claims={accountClaims.filter(claim => claimTypeOf(claim) === 'expense')}
-              employees={employees}
-              profileUsers={profileUsers}
+              employees={companyEmployees}
+              profileUsers={companyEmployees}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
               closeAdmin={() => openTab('dashboard')}
@@ -2430,8 +2442,8 @@ export default function App() {
           activeUser.role === 'Manager' && managerDataMode === 'overall' ? (
             <ManagerAnnualLeaveAdmin
               leaveRequests={visibleLeaveRequests}
-              employees={employees}
-              profileUsers={profileUsers}
+              employees={companyEmployees}
+              profileUsers={companyEmployees}
               bankHolidayEvents={bankHolidayEvents}
               updateLeaveRequest={updateLeaveRequest}
               closeAdmin={() => openTab('dashboard')}
@@ -3159,22 +3171,7 @@ function Dashboard({
     }
   ];
 
-  const profileDirectory = profileUsers.length ? profileUsers : employees;
-  const claimOnlyEmployees = (allEmployeeClaims || [])
-    .filter(claim => claim.employeeId && claim.employeeId !== activeUser.id)
-    .map(claim => ({
-      id: claim.employeeId,
-      name: claim.employeeName || claim.email || 'Unknown Employee',
-      email: claim.email || '',
-      department: claim.department || 'Production',
-      role: 'Employee'
-    }));
-  const employeeDirectory = Object.values([...profileDirectory, ...claimOnlyEmployees]
-    .filter(employee => employee.id !== activeUser.id)
-    .reduce((groups, employee) => {
-      groups[employee.id] = groups[employee.id] || employee;
-      return groups;
-    }, {}));
+  const employeeDirectory = directoryFromProfilesAndRecords(employees, allEmployeeClaims, activeUser.id);
   const employeeIds = new Set(employeeDirectory.map(employee => employee.id));
   const managerPersonalSummary = isManager
     ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests, activeUser.annualLeaveAllowance || 28, bankHolidayEvents, leaveYear)
@@ -4015,7 +4012,7 @@ function TimesheetForm(p) {
             <label className="label">Employee</label>
             {p.activeUser?.role === 'Manager' && !p.personalMode ? (
               <select className="select" value={p.employeeInfo.employeeId} onChange={e => p.setClaimEmployee(e.target.value)}>
-                {p.employees.filter(u => u.role !== 'Manager').map(u => (
+                {p.employees.filter(u => u.id !== p.activeUser?.id).map(u => (
                   <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
               </select>
@@ -4808,8 +4805,10 @@ function ManagerAnnualLeaveAdmin({
   };
 
   const pendingRequests = leaveRequests.filter(request => request.status === 'Submitted');
-  const employeeDirectory = (profileUsers.length ? profileUsers : employees)
-    .filter(employee => employee.role !== 'Manager');
+  const employeeDirectory = directoryFromProfilesAndRecords(
+    profileUsers.length ? profileUsers : employees,
+    leaveRequests
+  );
   const selectedEmployee = employeeDirectory.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeAllRequests = selectedEmployeeId
     ? leaveRequests.filter(request => request.employeeId === selectedEmployeeId)
@@ -5386,24 +5385,10 @@ function ManagerAdminCategory({
     return haystack.includes(searchText.toLowerCase());
   };
   const visibleClaims = claims.filter(matchesSearch);
-  const employeeDirectory = (profileUsers.length ? profileUsers : employees)
-    .filter(employee => employee.role !== 'Manager');
-  const claimOnlyEmployees = claims
-    .filter(claim => claim.employeeId && !employeeDirectory.some(employee => employee.id === claim.employeeId))
-    .map(claim => ({
-      id: claim.employeeId,
-      name: claim.employeeName || claim.email || 'Unknown Employee',
-      email: claim.email || '',
-      department: claim.department || 'Production',
-      role: 'Employee'
-    }));
-  const employeeDirectoryWithClaims = [
-    ...employeeDirectory,
-    ...Object.values(claimOnlyEmployees.reduce((groups, employee) => {
-      groups[employee.id] = employee;
-      return groups;
-    }, {}))
-  ];
+  const employeeDirectoryWithClaims = directoryFromProfilesAndRecords(
+    profileUsers.length ? profileUsers : employees,
+    claims
+  );
   const selectedEmployee = employeeDirectoryWithClaims.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeClaims = selectedEmployeeId
     ? (isExpenseAdmin ? visibleClaims : claims.filter(matchesSearch))
