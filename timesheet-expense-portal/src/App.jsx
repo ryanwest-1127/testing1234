@@ -871,7 +871,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, session?.user?.email]);
+  }, [session?.user?.id, session?.user?.email, profileReloadKey]);
 
   useEffect(() => {
     const defaultEmployee = activeUser.role === 'Manager' && managerDataMode === 'overall'
@@ -890,9 +890,11 @@ export default function App() {
       email: defaultEmployee.authEmail || defaultEmployee.email,
       notes: ''
     });
+    setStandardHours(String(defaultEmployee.dailyHours || 7.5));
+    setWeeklyStandardHours(String(defaultEmployee.weeklyHours || 37.5));
     setReviewingClaimId(null);
     setEntryHistoryView(null);
-  }, [activeUser, managerDataMode, profileUsers.length]);
+  }, [activeUser, managerDataMode, profileUsers]);
 
   useEffect(() => {
     if (!session || profileLoading || profileMissing) return;
@@ -1088,6 +1090,8 @@ export default function App() {
       employeeName: employee.name,
       email: employee.authEmail || employee.email
     }));
+    setStandardHours(String(employee.dailyHours || 7.5));
+    setWeeklyStandardHours(String(employee.weeklyHours || 37.5));
   };
 
   const updateTimesheet = (day, field, value) => {
