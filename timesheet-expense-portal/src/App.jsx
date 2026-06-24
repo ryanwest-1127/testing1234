@@ -3516,7 +3516,6 @@ function Dashboard({
                 type="button"
                 onClick={() => setTab('management')}
               >
-                <span className="status-light" />
                 <div>
                   <h2 className="approval-tile-title">Management</h2>
                   <p className="approval-tile-count">{employeeDirectory.length} employee account(s)</p>
