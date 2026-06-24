@@ -723,9 +723,22 @@ function timesheetClaimToRow(claim) {
   };
 }
 
+function hasPasswordSetupParams() {
+  if (typeof window === 'undefined') return false;
+
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const searchParams = new URLSearchParams(window.location.search);
+  const type = hashParams.get('type') || searchParams.get('type');
+
+  return ['invite', 'recovery'].includes(type) ||
+    hashParams.has('access_token') ||
+    searchParams.has('code');
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [passwordSetupMode, setPasswordSetupMode] = useState(() => hasPasswordSetupParams());
   const [profileLoading, setProfileLoading] = useState(false);
   const [profile, setProfile] = useState(null);
   const [profileError, setProfileError] = useState('');
@@ -775,7 +788,10 @@ export default function App() {
       setAuthLoading(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY' || hasPasswordSetupParams()) {
+        setPasswordSetupMode(true);
+      }
       setSession(nextSession);
       setAuthLoading(false);
     });
@@ -1624,8 +1640,30 @@ export default function App() {
     );
   }
 
+  if (!session && passwordSetupMode) {
+    return (
+      <div className="bg-gradient min-h-screen">
+        <div className="container">
+          <div className="card">
+            <div className="card-content muted">Completing account setup link...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!session) {
     return <LoginScreen />;
+  }
+
+  if (passwordSetupMode) {
+    return (
+      <SetPasswordScreen
+        email={session.user?.email}
+        finish={() => setPasswordSetupMode(false)}
+        signOut={signOut}
+      />
+    );
   }
 
   if (profileLoading) {
@@ -2191,7 +2229,7 @@ function LoginScreen() {
     }
 
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: window.location.origin
+      redirectTo: `${window.location.origin}?type=recovery`
     });
 
     setAuthMessage(error ? error.message : 'Password reset email sent.');
@@ -2250,6 +2288,101 @@ function LoginScreen() {
             <p className="xsmall muted">
               Accounts are created by the company admin. Public sign-up is disabled in this app.
             </p>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+function SetPasswordScreen({ email, finish, signOut }) {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const savePassword = async (event) => {
+    event.preventDefault();
+    setMessage('');
+
+    if (password.length < 8) {
+      setMessage('Password must be at least 8 characters.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setMessage('Passwords do not match.');
+      return;
+    }
+
+    setSubmitting(true);
+    const { error } = await supabase.auth.updateUser({ password });
+
+    if (error) {
+      setMessage(error.message);
+      setSubmitting(false);
+      return;
+    }
+
+    window.history.replaceState({}, document.title, window.location.pathname);
+    setMessage('Password saved. Opening portal...');
+    setSubmitting(false);
+    window.setTimeout(finish, 400);
+  };
+
+  return (
+    <div className="bg-gradient min-h-screen">
+      <div className="container">
+        <div className="card" style={{ maxWidth: 460, margin: '48px auto' }}>
+          <form className="card-content space-y-sm" onSubmit={savePassword}>
+            <div>
+              <p className="small muted">Account Setup</p>
+              <h1 className="title" style={{ color: '#0f172a' }}>Set Your Password</h1>
+              <p className="small muted">
+                {email ? `You are setting a password for ${email}.` : 'Create a password to finish setting up your account.'}
+              </p>
+            </div>
+
+            <div>
+              <label className="label">New Password</label>
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={event => setPassword(event.target.value)}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="label">Confirm Password</label>
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={event => setConfirmPassword(event.target.value)}
+                required
+              />
+            </div>
+
+            {message && (
+              <div className="small muted" style={{ background: '#f8fafc', padding: 12, borderRadius: 8 }}>
+                {message}
+              </div>
+            )}
+
+            <div className="flex gap" style={{ flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+              <button className="btn" type="submit" disabled={submitting}>
+                {submitting ? 'Saving...' : 'Save Password'}
+              </button>
+              <button className="btn secondary" type="button" onClick={signOut}>
+                Cancel
+              </button>
+            </div>
           </form>
         </div>
       </div>
