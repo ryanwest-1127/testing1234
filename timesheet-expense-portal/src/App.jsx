@@ -3463,7 +3463,6 @@ function Dashboard({
                   <tr>
                     <th>Employee</th>
                     <th>Department</th>
-                    <th>Current Week Hours</th>
                     <th>AL Remaining</th>
                     <th>TIL Remaining</th>
                     <th>Expense Total</th>
@@ -3475,7 +3474,6 @@ function Dashboard({
                     <tr key={employee.id}>
                       <td><b>{employee.name}</b><br /><span className="xsmall muted">{employee.email}</span></td>
                       <td>{employee.department}</td>
-                      <td>{Number(summary.totalWorkingHours || 0).toFixed(2)} / {Number(summary.targetHours || 0).toFixed(2)} hrs</td>
                       <td>{summary.annualLeaveRemaining} / {summary.annualLeaveTotal} days</td>
                       <td>{Number(summary.timeInLieuRemaining || 0).toFixed(2)} hrs</td>
                       <td>{money(summary.outstandingExpenses)}</td>
@@ -5400,6 +5398,7 @@ function ManagerAdminCategory({
   const selectedEmployeeSelectedClaim = selectedEmployeeClaims.find(claim => claim.id === selectedClaimId) ||
     selectedEmployeeClaims[0] ||
     null;
+  const totalWeeksInSummaryYear = getWeeksInBusinessYear(new Date().getFullYear());
   const employeeRows = employeeDirectoryWithClaims
     .map(employee => {
       const employeeClaims = claims.filter(claim => claim.employeeId === employee.id);
@@ -5412,8 +5411,6 @@ function ManagerAdminCategory({
         (sum, claim) => sum + Number(claim.totals?.timeInLieu || 0) - Number(claim.totals?.takeBackTimeInLieu || 0),
         0
       );
-      const latestClaim = [...employeeClaims].sort((a, b) => String(b.week || '').localeCompare(String(a.week || '')))[0];
-
       return {
         ...employee,
         total: employeeClaims.length,
@@ -5423,7 +5420,7 @@ function ManagerAdminCategory({
         totalAmount,
         totalHours,
         tilRemaining,
-        latestWeek: latestClaim ? (latestClaim.weekLabel || latestClaim.week) : '—'
+        totalWeeks: totalWeeksInSummaryYear
       };
     })
     .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
@@ -5599,8 +5596,10 @@ function ManagerAdminCategory({
                     <tr>
                       <th>Employee</th>
                       <th>Pending</th>
+                      <th>Approved</th>
+                      <th>Rejected</th>
                       <th>Time in Lieu Remaining</th>
-                      <th>Week</th>
+                      <th>Total</th>
                       <th>Full Data</th>
                     </tr>
                   )}
@@ -5629,8 +5628,10 @@ function ManagerAdminCategory({
                             {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                             {employee.pending}
                           </td>
+                          <td>{employee.approved}</td>
+                          <td>{employee.rejected}</td>
                           <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
-                          <td>{employee.latestWeek}</td>
+                          <td>{employee.total} / {employee.totalWeeks}</td>
                           <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
                         </>
                       )}
@@ -5721,8 +5722,10 @@ function ManagerAdminCategory({
                         <tr>
                           <th>Employee</th>
                           <th>Pending</th>
+                          <th>Approved</th>
+                          <th>Rejected</th>
                           <th>Time in Lieu Remaining</th>
-                          <th>Week</th>
+                          <th>Total</th>
                           <th>Full Data</th>
                         </tr>
                       </thead>
@@ -5734,8 +5737,10 @@ function ManagerAdminCategory({
                               {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                               {employee.pending}
                             </td>
+                            <td>{employee.approved}</td>
+                            <td>{employee.rejected}</td>
                             <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
-                            <td>{employee.latestWeek}</td>
+                            <td>{employee.total} / {employee.totalWeeks}</td>
                             <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
                           </tr>
                         ))}
