@@ -3420,7 +3420,7 @@ function Dashboard({
               </button>
 
               <button
-                className={`approval-tile ${managerApprovalCounts.expenses || approvedExpensesAwaitingPayment.length ? 'pending' : ''}`}
+                className={`approval-tile ${managerApprovalCounts.expenses ? 'pending' : ''}`}
                 type="button"
                 onClick={() => setTab('expense')}
               >
