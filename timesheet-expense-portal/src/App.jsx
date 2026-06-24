@@ -129,6 +129,12 @@ function nearestCurrentOrPastWeekClaim(claims) {
   return [...sortedClaims].reverse().find(claim => String(claim.week || '') <= currentWeek) || sortedClaims[0];
 }
 
+function defaultApprovalClaim(claims, isExpense = false) {
+  const pendingClaim = (claims || []).find(claim => claim.status === 'Submitted');
+  if (pendingClaim) return pendingClaim;
+  return isExpense ? (claims || [])[0] || null : nearestCurrentOrPastWeekClaim(claims || []);
+}
+
 function sortApplicationsPendingFirst(applications, periodGetter) {
   const statusRank = { Submitted: 0, Approved: 1, Paid: 1, Rejected: 2 };
   return [...(applications || [])].sort((a, b) => {
@@ -2279,19 +2285,6 @@ export default function App() {
           <div className="card">
             <div className="card-content small muted">
               Profile lookup warning: {profileError}. Please check this account has an active Supabase profile.
-            </div>
-          </div>
-        )}
-
-        {activeUser.role === 'Manager' && managerDataMode === 'personal' && (
-          <div className="card">
-            <div className="card-content flex justify-between items-center" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <p className="small muted">Personal Snapshot</p>
-                <h2>My Manager Account Data</h2>
-                <p className="small muted">These cards show Boss personal AL, TIL, expense and pending items only.</p>
-              </div>
-              <span className="badge Approved">Personal</span>
             </div>
           </div>
         )}
@@ -5600,7 +5593,7 @@ function ManagerAdminCategory({
       )
     : [];
   const selectedEmployeeSelectedClaim = selectedEmployeeClaims.find(claim => claim.id === selectedClaimId) ||
-    selectedEmployeeClaims[0] ||
+    defaultApprovalClaim(selectedEmployeeClaims, isExpenseAdmin) ||
     null;
   const totalWeeksInSummaryYear = getWeeksInBusinessYear(new Date().getFullYear());
   const employeeRows = employeeDirectoryWithClaims
@@ -5630,7 +5623,7 @@ function ManagerAdminCategory({
     .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
 
   useEffect(() => {
-    const defaultClaim = selectedEmployeeClaims[0];
+    const defaultClaim = defaultApprovalClaim(selectedEmployeeClaims, isExpenseAdmin);
     setSelectedClaimId(defaultClaim?.id || '');
   }, [selectedEmployeeId, searchText, claims.length, isExpenseAdmin]);
 
@@ -6128,6 +6121,7 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
 
 function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, updateClaim }) {
   const [note, setNote] = useState('');
+  const [weekPickerMessage, setWeekPickerMessage] = useState('');
   const selectedIndex = Math.max(0, claims.findIndex(item => item.id === selectedClaimId));
   const canMovePrevious = claims.length > 1 && selectedIndex > 0;
   const canMoveNext = claims.length > 1 && selectedIndex < claims.length - 1;
@@ -6141,6 +6135,18 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
     if (!claims.length) return;
     const nextIndex = Math.min(Math.max(selectedIndex + direction, 0), claims.length - 1);
     setSelectedClaimId(claims[nextIndex]?.id || '');
+    setWeekPickerMessage('');
+  };
+
+  const selectWeekClaim = (week) => {
+    const matchingClaim = claims.find(item => item.week === week);
+    if (!matchingClaim) {
+      setWeekPickerMessage(`No submitted timesheet data found for ${weekLabel(week)}.`);
+      return;
+    }
+
+    setSelectedClaimId(matchingClaim.id);
+    setWeekPickerMessage('');
   };
 
   if (!claim) {
@@ -6159,12 +6165,21 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
             <h2>Timesheet Week Detail</h2>
             <p className="small muted">{claim.employeeName} - {claim.weekLabel || claim.week}</p>
           </div>
-          <div className="request-stepper">
-            <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveClaim(-1)}>{'<'}</button>
-            <span className="request-stepper-count">{claims.length ? `${selectedIndex + 1} / ${claims.length}` : '0 / 0'}</span>
-            <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveClaim(1)}>{'>'}</button>
+          <div className="flex gap items-center" style={{ flexWrap: 'wrap' }}>
+            <BusinessWeekPicker value={claim.week || currentBusinessWeekValue()} onChange={selectWeekClaim} />
+            <div className="request-stepper">
+              <button className="btn secondary" type="button" disabled={!canMovePrevious} onClick={() => moveClaim(-1)}>{'<'}</button>
+              <span className="request-stepper-count">{claims.length ? `${selectedIndex + 1} / ${claims.length}` : '0 / 0'}</span>
+              <button className="btn secondary" type="button" disabled={!canMoveNext} onClick={() => moveClaim(1)}>{'>'}</button>
+            </div>
           </div>
         </div>
+
+        {weekPickerMessage && (
+          <div className="small muted" style={{ background: '#f8fafc', padding: 10, borderRadius: 8 }}>
+            {weekPickerMessage}
+          </div>
+        )}
 
         <div className="grid grid-4">
           <Mini label="Working Hours" value={`${claim.totals?.totalWorkingHours?.toFixed?.(2) || '0.00'} hrs`} />
