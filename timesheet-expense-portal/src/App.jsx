@@ -536,6 +536,12 @@ function expenseItemEffectiveStatus(expense, claimStatus = 'Submitted') {
   return expense.applicationStatus || claimStatus || 'Submitted';
 }
 
+function expenseApprovedAmount(expense) {
+  return expense.approvalStatus === 'rejected'
+    ? Number(expense.approvedAmount || 0)
+    : Number(expense.amount || 0);
+}
+
 function expenseItemsWithApplicationMetadata(claim) {
   return (claim.expenses || []).map((expense) => ({
     ...expense,
@@ -553,11 +559,7 @@ function mergeExpenseClaimsForMonth(existingClaim, incomingClaim) {
   ];
   const totalExpense = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
   const totalVAT = expenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
-  const approvedAmount = expenses.reduce((sum, expense) => {
-    return sum + (expense.approvalStatus === 'rejected'
-      ? Number(expense.approvedAmount || 0)
-      : Number(expense.amount || 0));
-  }, 0);
+  const approvedAmount = expenses.reduce((sum, expense) => sum + expenseApprovedAmount(expense), 0);
   const expenseMonth = getClaimExpenseMonth(existingClaim) || getClaimExpenseMonth(incomingClaim);
 
   return {
@@ -3403,9 +3405,7 @@ function Dashboard({
             : item.month === selectedDashboardExpensePeriod;
     });
   const companyExpenseGross = approvedCompanyExpenseItems.reduce((sum, item) => {
-    return sum + (item.expense.approvalStatus === 'rejected'
-      ? Number(item.expense.approvedAmount || 0)
-      : Number(item.expense.amount || 0));
+    return sum + expenseApprovedAmount(item.expense);
   }, 0);
   const companyExpenseApprovedPaid = companyExpenseGross;
   const companyVATTotal = approvedCompanyExpenseItems.reduce((sum, item) => sum + Number(item.expense.vat || 0), 0);
@@ -3413,9 +3413,7 @@ function Dashboard({
     approvedCompanyExpenseItems.reduce((groups, item) => {
       const category = item.expense.category || 'Other';
       const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
-      const approvedValue = item.expense.approvalStatus === 'rejected'
-        ? Number(item.expense.approvedAmount || 0)
-        : Number(item.expense.amount || 0);
+      const approvedValue = expenseApprovedAmount(item.expense);
       groups[category] = {
         ...existing,
         value: existing.value + approvedValue,
@@ -4452,8 +4450,10 @@ function ExpenseForm(p) {
   const currentExpenseSummaryTotal = savedCurrentMonthTotal + currentExpenseTotal;
   const savedPaidExpenseTotal = savedSummaryClaims
     .filter(claim => ['Approved', 'Paid'].includes(claim.status))
-    .reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
-  const currentPaidExpenseTotal = savedPaidExpenseTotal + (['Approved', 'Paid'].includes(editingClaim?.status) ? currentExpenseTotal : 0);
+    .reduce((sum, claim) => sum + (claim.expenses || []).reduce((itemSum, expense) => itemSum + expenseApprovedAmount(expense), 0), 0);
+  const currentPaidExpenseTotal = savedPaidExpenseTotal + (['Approved', 'Paid'].includes(editingClaim?.status)
+    ? (p.expenses || []).reduce((sum, expense) => sum + expenseApprovedAmount(expense), 0)
+    : 0);
   const personalExpenseSummaryItems = [
     ...savedSummaryClaims.flatMap(claim => (claim.expenses || []).map(expense => ({ expense, status: claim.status }))),
     ...(p.expenses || []).map(expense => ({ expense, status: editingClaim?.status || 'Current' }))
@@ -4461,9 +4461,12 @@ function ExpenseForm(p) {
   const personalExpenseByCategory = Object.values(personalExpenseSummaryItems.reduce((groups, item) => {
     const category = item.expense.category || 'Other';
     const existing = groups[category] || { name: category, value: 0, count: 0 };
+    const itemValue = ['Approved', 'Paid'].includes(item.status)
+      ? expenseApprovedAmount(item.expense)
+      : Number(item.expense.amount || 0);
     groups[category] = {
       ...existing,
-      value: existing.value + Number(item.expense.amount || 0),
+      value: existing.value + itemValue,
       count: existing.count + 1
     };
     return groups;
@@ -5540,9 +5543,7 @@ function ManagerAdminCategory({
         })
     : [];
   const expenseGross = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => {
-    return sum + (item.expense.approvalStatus === 'rejected'
-      ? Number(item.expense.approvedAmount || 0)
-      : Number(item.expense.amount || 0));
+    return sum + expenseApprovedAmount(item.expense);
   }, 0) : 0;
   const expenseApprovedPaid = expenseGross;
   const expenseVat = isExpenseAdmin ? approvedExpenseItemsForSummary.reduce((sum, item) => sum + Number(item.expense.vat || 0), 0) : 0;
@@ -5550,9 +5551,7 @@ function ManagerAdminCategory({
     ? Object.values(approvedExpenseItemsForSummary.reduce((groups, item) => {
         const category = item.expense.category || 'Other';
         const existing = groups[category] || { name: category, value: 0, vat: 0, count: 0 };
-        const approvedValue = item.expense.approvalStatus === 'rejected'
-          ? Number(item.expense.approvedAmount || 0)
-          : Number(item.expense.amount || 0);
+        const approvedValue = expenseApprovedAmount(item.expense);
         groups[category] = {
           ...existing,
           value: existing.value + approvedValue,
@@ -5976,11 +5975,7 @@ function expenseApplicationClaimsFromMonthlyClaim(claim) {
   return Object.values(groups).map((group, index) => {
     const totalExpense = group.expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     const totalVAT = group.expenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
-    const approvedAmount = group.expenses.reduce((sum, expense) => {
-      return sum + (expense.approvalStatus === 'rejected'
-        ? Number(expense.approvedAmount || 0)
-        : Number(expense.amount || 0));
-    }, 0);
+    const approvedAmount = group.expenses.reduce((sum, expense) => sum + expenseApprovedAmount(expense), 0);
     const applicationLabel = group.applicationSubmittedAt
       ? `Application ${index + 1} - ${group.applicationSubmittedAt}`
       : `Application ${index + 1}`;
@@ -6037,11 +6032,7 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
       };
     });
 
-    const totalApprovedAmount = nextExpenses.reduce((sum, expense) => {
-      return sum + (expense.approvalStatus === 'rejected'
-        ? Number(expense.approvedAmount || 0)
-        : Number(expense.amount || 0));
-    }, 0);
+    const totalApprovedAmount = nextExpenses.reduce((sum, expense) => sum + expenseApprovedAmount(expense), 0);
 
     updateClaim(claim.id, {
       expenses: nextExpenses,
@@ -6268,21 +6259,13 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
         const canManageExpense = manager && isExpense && !managerReadOnly && !isLockedExpense;
         const hasLockedExpenseRows = lockApprovedExpenseRows && expenseItems.some(expense => expenseItemEffectiveStatus(expense, c.status) !== 'Submitted');
         const canEditLockedRows = Boolean(editingLockedExpenseIds[c.id]);
-        const expenseDecisionAmount = (expense) =>
-          expense.approvalStatus === 'rejected'
-            ? Number(expense.approvedAmount || 0)
-            : Number(expense.amount || 0);
-        const approvedExpenseAmount = expenseItems.reduce((sum, expense) => sum + expenseDecisionAmount(expense), 0);
+        const approvedExpenseAmount = expenseItems.reduce((sum, expense) => sum + expenseApprovedAmount(expense), 0);
         const allExpenseItemsApproved = expenseItems.length > 0 && expenseItems.every(expense => expense.approvalStatus !== 'rejected');
         const claimReceiptItems = receiptDownloadItemsFromClaims([c]);
         const claimReceiptZipName = `${sanitizeFilenamePart(c.employeeName || 'Employee')}_${sanitizeFilenamePart(c.periodLabel || getClaimExpenseMonth(c) || c.id)}_receipt-proofs.zip`;
         const updateExpenseItems = (mapper) => {
           const nextExpenses = (c.expenses || []).map(mapper);
-          const nextApprovedAmount = nextExpenses.reduce((sum, expense) => {
-            return sum + (expense.approvalStatus === 'rejected'
-              ? Number(expense.approvedAmount || 0)
-              : Number(expense.amount || 0));
-          }, 0);
+          const nextApprovedAmount = nextExpenses.reduce((sum, expense) => sum + expenseApprovedAmount(expense), 0);
           updateClaim(c.id, { expenses: nextExpenses, approvedAmount: nextApprovedAmount });
         };
         const setAllExpenseItemsApproved = (approved) => {
