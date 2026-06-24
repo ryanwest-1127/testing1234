@@ -1082,8 +1082,6 @@ export default function App() {
     let cancelled = false;
 
     const loadTimesheets = async () => {
-      setTimesheetSyncStatus('Loading timesheets from Supabase...');
-
       const { data, error } = await supabase
         .from('timesheet_claims')
         .select('id,employee_id,week,status,claim,updated_at')
@@ -1101,9 +1099,7 @@ export default function App() {
         const localNonTimesheets = prev.filter(claim => claimTypeOf(claim) !== 'timesheet');
         return uniqueClaimsByEmployeeWeekType([...remoteTimesheets, ...localNonTimesheets]);
       });
-      setTimesheetSyncStatus(remoteTimesheets.length
-        ? `Loaded ${remoteTimesheets.length} timesheet record(s) from Supabase.`
-        : 'Timesheets are ready in Supabase.');
+      setTimesheetSyncStatus('');
     };
 
     loadTimesheets();
@@ -1188,9 +1184,7 @@ export default function App() {
         const localNonExpenses = prev.filter(claim => claimTypeOf(claim) !== 'expense');
         return uniqueClaimsByEmployeeWeekType([...remoteExpenses, ...localNonExpenses]);
       });
-      setDataSyncStatus(remoteExpenses.length
-        ? `Loaded ${remoteExpenses.length} expense claim(s) from Supabase.`
-        : 'Expenses are ready in Supabase.');
+      setDataSyncStatus('');
     };
 
     loadExpenseClaims();
@@ -1246,7 +1240,7 @@ export default function App() {
 
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const portalEmployees = profileUsers.length ? profileUsers : employees;
-  const baseCompanyUsers = portalEmployees.filter(isUserVisibleInCompanyDirectory);
+  const baseCompanyUsers = [...portalEmployees, activeUser].filter(isUserVisibleInCompanyDirectory);
   const companyEmployees = directoryFromProfilesAndRecords(baseCompanyUsers, [...cleanClaims, ...leaveRequests]);
   const companyEmployeeIds = new Set(companyEmployees.map(employee => employee.id));
   const findPortalEmployee = (employeeId) =>
@@ -2170,22 +2164,6 @@ export default function App() {
           <div className="card">
             <div className="card-content small muted">
               Profile lookup warning: {profileError}. Please check this account has an active Supabase profile.
-            </div>
-          </div>
-        )}
-
-        {timesheetSyncStatus && /warning|failed|skipped|error/i.test(timesheetSyncStatus) && (
-          <div className="card">
-            <div className="card-content small muted">
-              {timesheetSyncStatus}
-            </div>
-          </div>
-        )}
-
-        {dataSyncStatus && /warning|failed|skipped|error/i.test(dataSyncStatus) && (
-          <div className="card">
-            <div className="card-content small muted">
-              {dataSyncStatus}
             </div>
           </div>
         )}
@@ -3175,7 +3153,7 @@ function Dashboard({
     }
   ];
 
-  const employeeDirectory = directoryFromProfilesAndRecords(employees, allEmployeeClaims);
+  const employeeDirectory = directoryFromProfilesAndRecords([...employees, activeUser], allEmployeeClaims);
   const employeeIds = new Set(employeeDirectory.map(employee => employee.id));
   const managerPersonalSummary = isManager
     ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests, activeUser.annualLeaveAllowance || 28, bankHolidayEvents, leaveYear)
