@@ -129,6 +129,15 @@ function nearestCurrentOrPastWeekClaim(claims) {
   return [...sortedClaims].reverse().find(claim => String(claim.week || '') <= currentWeek) || sortedClaims[0];
 }
 
+function sortApplicationsPendingFirst(applications, periodGetter) {
+  const statusRank = { Submitted: 0, Approved: 1, Paid: 1, Rejected: 2 };
+  return [...(applications || [])].sort((a, b) => {
+    return (statusRank[a.status] ?? 3) - (statusRank[b.status] ?? 3) ||
+      String(periodGetter(b) || '').localeCompare(String(periodGetter(a) || '')) ||
+      String(b.submittedAt || '').localeCompare(String(a.submittedAt || ''));
+  });
+}
+
 function currentMonthValue() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -4816,12 +4825,17 @@ function ManagerAnnualLeaveAdmin({
   const employeeRows = employeeDirectory
     .map(employee => {
       const employeeRequests = leaveRequests.filter(request => employee.id === request.employeeId);
+      const approvedUsed = calculateApprovedLeaveDays(employeeRequests, managerBankHolidayDateSet, managerAlYear);
+      const bankHolidayDeduction = calculateBankHolidayDeduction(bankHolidayEvents, managerAlYear);
+      const allowance = Number(employee.annualLeaveAllowance || 28);
       return {
         ...employee,
         total: employeeRequests.length,
         pending: employeeRequests.filter(request => request.status === 'Submitted').length,
         approved: employeeRequests.filter(request => request.status === 'Approved').length,
-        rejected: employeeRequests.filter(request => request.status === 'Rejected').length
+        rejected: employeeRequests.filter(request => request.status === 'Rejected').length,
+        allowance,
+        remaining: Math.max(0, allowance - bankHolidayDeduction - approvedUsed)
       };
     })
     .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
@@ -4869,6 +4883,7 @@ function ManagerAnnualLeaveAdmin({
                     <th>Employee</th>
                     <th>Department</th>
                     <th>Pending</th>
+                    <th>AL Remaining</th>
                     <th>Approved</th>
                     <th>Rejected</th>
                     <th>Total</th>
@@ -4884,6 +4899,7 @@ function ManagerAnnualLeaveAdmin({
                         {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                         {employee.pending}
                       </td>
+                      <td>{employee.remaining} / {employee.allowance} days</td>
                       <td>{employee.approved}</td>
                       <td>{employee.rejected}</td>
                       <td>{employee.total}</td>
@@ -4942,6 +4958,7 @@ function ManagerAnnualLeaveAdmin({
                       <th>Employee</th>
                       <th>Department</th>
                       <th>Pending</th>
+                      <th>AL Remaining</th>
                       <th>Approved</th>
                       <th>Rejected</th>
                       <th>Total</th>
@@ -4957,6 +4974,7 @@ function ManagerAnnualLeaveAdmin({
                           {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                           {employee.pending}
                         </td>
+                        <td>{employee.remaining} / {employee.allowance} days</td>
                         <td>{employee.approved}</td>
                         <td>{employee.rejected}</td>
                         <td>{employee.total}</td>
@@ -5373,14 +5391,14 @@ function ManagerAdminCategory({
   );
   const selectedEmployee = employeeDirectoryWithClaims.find(employee => employee.id === selectedEmployeeId);
   const selectedEmployeeClaims = selectedEmployeeId
-    ? (isExpenseAdmin ? visibleClaims : claims.filter(matchesSearch))
-        .filter(claim => claim.employeeId === selectedEmployeeId)
-        .sort((a, b) => isExpenseAdmin
-          ? String(getClaimExpenseMonth(b)).localeCompare(String(getClaimExpenseMonth(a)))
-          : String(a.week || '').localeCompare(String(b.week || '')))
+    ? sortApplicationsPendingFirst(
+        (isExpenseAdmin ? visibleClaims : claims.filter(matchesSearch))
+          .filter(claim => claim.employeeId === selectedEmployeeId),
+        claim => isExpenseAdmin ? getClaimExpenseMonth(claim) : claim.week
+      )
     : [];
   const selectedEmployeeSelectedClaim = selectedEmployeeClaims.find(claim => claim.id === selectedClaimId) ||
-    (isExpenseAdmin ? selectedEmployeeClaims[0] : nearestCurrentOrPastWeekClaim(selectedEmployeeClaims)) ||
+    selectedEmployeeClaims[0] ||
     null;
   const employeeRows = employeeDirectoryWithClaims
     .map(employee => {
@@ -5390,8 +5408,6 @@ function ManagerAdminCategory({
       const rejected = employeeClaims.filter(claim => claim.status === 'Rejected').length;
       const totalAmount = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalExpense || 0), 0);
       const totalHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.totalWorkingHours || 0), 0);
-      const projectHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.projectHours || 0), 0);
-      const travelHours = employeeClaims.reduce((sum, claim) => sum + Number(claim.totals?.travelHours || 0), 0);
       const tilRemaining = employeeClaims.reduce(
         (sum, claim) => sum + Number(claim.totals?.timeInLieu || 0) - Number(claim.totals?.takeBackTimeInLieu || 0),
         0
@@ -5406,8 +5422,6 @@ function ManagerAdminCategory({
         rejected,
         totalAmount,
         totalHours,
-        projectHours,
-        travelHours,
         tilRemaining,
         latestWeek: latestClaim ? (latestClaim.weekLabel || latestClaim.week) : '—'
       };
@@ -5415,7 +5429,7 @@ function ManagerAdminCategory({
     .sort((a, b) => b.pending - a.pending || a.name.localeCompare(b.name));
 
   useEffect(() => {
-    const defaultClaim = isExpenseAdmin ? selectedEmployeeClaims[0] : nearestCurrentOrPastWeekClaim(selectedEmployeeClaims);
+    const defaultClaim = selectedEmployeeClaims[0];
     setSelectedClaimId(defaultClaim?.id || '');
   }, [selectedEmployeeId, searchText, claims.length, isExpenseAdmin]);
 
@@ -5585,8 +5599,6 @@ function ManagerAdminCategory({
                     <tr>
                       <th>Employee</th>
                       <th>Pending</th>
-                      <th>Project / Workshop</th>
-                      <th>Travel</th>
                       <th>Time in Lieu Remaining</th>
                       <th>Week</th>
                       <th>Full Data</th>
@@ -5617,8 +5629,6 @@ function ManagerAdminCategory({
                             {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                             {employee.pending}
                           </td>
-                          <td>{Number(employee.projectHours || 0).toFixed(2)} hrs</td>
-                          <td>{Number(employee.travelHours || 0).toFixed(2)} hrs</td>
                           <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
                           <td>{employee.latestWeek}</td>
                           <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
@@ -5711,8 +5721,6 @@ function ManagerAdminCategory({
                         <tr>
                           <th>Employee</th>
                           <th>Pending</th>
-                          <th>Project / Workshop</th>
-                          <th>Travel</th>
                           <th>Time in Lieu Remaining</th>
                           <th>Week</th>
                           <th>Full Data</th>
@@ -5726,8 +5734,6 @@ function ManagerAdminCategory({
                               {employee.pending ? <span className="pending-dot" aria-hidden="true" /> : null}
                               {employee.pending}
                             </td>
-                            <td>{Number(employee.projectHours || 0).toFixed(2)} hrs</td>
-                            <td>{Number(employee.travelHours || 0).toFixed(2)} hrs</td>
                             <td>{Number(employee.tilRemaining || 0).toFixed(2)} hrs</td>
                             <td>{employee.latestWeek}</td>
                             <td><button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId(employee.id)}>View Full Data</button></td>
