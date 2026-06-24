@@ -96,4 +96,181 @@ th { color: #64748b; font-weight: 700; }
 .receipt-proof:hover .receipt-proof-popover, .receipt-proof:focus-within .receipt-proof-popover { display: block; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.65); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
 .modal { background: white; width: min(900px, 96vw); max-height: 90vh; overflow: auto; border-radius: 28px; padding: 24px; }
-@media (max-width: 900px) { .grid-5, .grid-4, .grid-3, .grid-2, .grid-2-1, .expense-row { grid-template-columns: 1fr; } .tabs { grid-template-columns: 1fr 1fr; } .container { padding: 16px; } .wide { overflow-x: auto; } }
+
+@media (max-width: 900px) {
+  .grid-5, .grid-4, .grid-3, .grid-2, .grid-2-1, .expense-row { grid-template-columns: 1fr; }
+  .tabs { grid-template-columns: 1fr 1fr; }
+  .container { padding: 16px; }
+  .wide { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .wide table { min-width: 760px; }
+}
+
+@media (max-width: 640px) {
+  body { font-size: 15px; }
+  .container { padding: 10px; }
+  .space-y > * + * { margin-top: 14px; }
+  .card { border-radius: 16px; }
+  .card-dark { border-radius: 18px; padding: 16px; }
+  .card-content { padding: 14px; }
+  .title { font-size: 24px; line-height: 1.15; }
+  .subtitle { font-size: 13px; max-width: none; }
+  .metric-value { font-size: 22px; }
+
+  .flex.justify-between,
+  .card-content.flex.justify-between,
+  .card-content.flex.gap,
+  .flex.gap.items-center {
+    align-items: stretch;
+  }
+
+  .manager-mode-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    border-radius: 16px;
+  }
+
+  .manager-mode-switch button,
+  .detail-view-switch button {
+    min-height: 40px;
+  }
+
+  .tabs {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-radius: 16px;
+    padding: 4px;
+  }
+
+  .tab {
+    padding: 10px 8px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
+
+  .btn {
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+
+  .btn.ghost {
+    width: auto;
+  }
+
+  .input, .textarea, .select {
+    min-height: 42px;
+    border-radius: 10px;
+  }
+
+  .wide {
+    margin-left: -14px;
+    margin-right: -14px;
+    padding: 0 14px 8px;
+  }
+
+  .wide::after {
+    content: 'Swipe table sideways';
+    display: block;
+    color: #94a3b8;
+    font-size: 11px;
+    margin-top: 6px;
+  }
+
+  table { font-size: 13px; }
+  th, td { padding: 9px 8px; white-space: nowrap; }
+
+  .approval-tile {
+    min-height: auto;
+    padding: 14px 14px 14px 42px;
+    border-radius: 14px;
+  }
+
+  .approval-tile-title {
+    font-size: 18px;
+  }
+
+  .approval-nav-tile {
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .approval-nav-title {
+    font-size: 15px;
+  }
+
+  .expense-row {
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .receipt-proof-cell {
+    min-height: auto;
+    align-items: stretch;
+  }
+
+  .receipt-proof,
+  .receipt-proof-trigger {
+    width: 100%;
+  }
+
+  .receipt-proof-popover {
+    left: 0;
+    right: auto;
+    width: min(280px, calc(100vw - 48px));
+  }
+
+  .al-calendar-grid {
+    grid-template-columns: 38px repeat(7, minmax(36px, 1fr));
+    gap: 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .al-week-number {
+    min-height: 74px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+
+  .month-stepper {
+    width: 100%;
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+  }
+
+  .month-stepper h2 {
+    font-size: 18px;
+  }
+
+  .month-picker-input {
+    max-width: none;
+    width: 100%;
+  }
+
+  .request-stepper {
+    width: 100%;
+    grid-template-columns: 42px 1fr 42px;
+  }
+
+  .detail-view-switch {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-radius: 16px;
+  }
+
+  .modal-backdrop {
+    padding: 10px;
+    align-items: stretch;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+    border-radius: 18px;
+    padding: 14px;
+  }
+}
