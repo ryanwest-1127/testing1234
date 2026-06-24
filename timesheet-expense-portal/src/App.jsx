@@ -751,6 +751,12 @@ function directoryFromProfilesAndRecords(baseUsers = [], records = [], excludeId
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 }
 
+function isUserVisibleInCompanyDirectory(user) {
+  if (!user?.id) return false;
+  if (isUuid(user.id)) return true;
+  return user.role !== 'Manager';
+}
+
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
 }
@@ -1240,10 +1246,8 @@ export default function App() {
 
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const portalEmployees = profileUsers.length ? profileUsers : employees;
-  const baseCompanyUsers = profileUsers.length
-    ? portalEmployees
-    : portalEmployees.filter(employee => employee.role !== 'Manager');
-  const companyEmployees = directoryFromProfilesAndRecords(baseCompanyUsers, [...cleanClaims, ...leaveRequests], activeUser.id);
+  const baseCompanyUsers = portalEmployees.filter(isUserVisibleInCompanyDirectory);
+  const companyEmployees = directoryFromProfilesAndRecords(baseCompanyUsers, [...cleanClaims, ...leaveRequests]);
   const companyEmployeeIds = new Set(companyEmployees.map(employee => employee.id));
   const findPortalEmployee = (employeeId) =>
     portalEmployees.find(employee => employee.id === employeeId) ||
@@ -2170,7 +2174,7 @@ export default function App() {
           </div>
         )}
 
-        {timesheetSyncStatus && (
+        {timesheetSyncStatus && /warning|failed|skipped|error/i.test(timesheetSyncStatus) && (
           <div className="card">
             <div className="card-content small muted">
               {timesheetSyncStatus}
@@ -2178,7 +2182,7 @@ export default function App() {
           </div>
         )}
 
-        {dataSyncStatus && (
+        {dataSyncStatus && /warning|failed|skipped|error/i.test(dataSyncStatus) && (
           <div className="card">
             <div className="card-content small muted">
               {dataSyncStatus}
@@ -3171,7 +3175,7 @@ function Dashboard({
     }
   ];
 
-  const employeeDirectory = directoryFromProfilesAndRecords(employees, allEmployeeClaims, activeUser.id);
+  const employeeDirectory = directoryFromProfilesAndRecords(employees, allEmployeeClaims);
   const employeeIds = new Set(employeeDirectory.map(employee => employee.id));
   const managerPersonalSummary = isManager
     ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests, activeUser.annualLeaveAllowance || 28, bankHolidayEvents, leaveYear)
