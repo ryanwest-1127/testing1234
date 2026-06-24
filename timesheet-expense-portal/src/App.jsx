@@ -3518,7 +3518,7 @@ function Dashboard({
               >
                 <div>
                   <h2 className="approval-tile-title">Management</h2>
-                  <p className="approval-tile-count">{employeeDirectory.length} employee account(s)</p>
+                  <p className="small muted">{employeeDirectory.length} employee account(s)</p>
                   <p className="small muted">Manage employee profiles, roles, hours and AL allowance</p>
                 </div>
               </button>
@@ -5097,7 +5097,7 @@ function ApprovalDashboardNav({ setTab, currentTab, counts = {}, hideBeforeCurre
             <button
               key={item.key}
               type="button"
-              className={`approval-nav-tile ${currentTab === item.key ? 'active' : ''} ${item.count ? 'pending' : ''}`}
+              className={`approval-nav-tile ${currentTab === item.key && item.key !== 'management' ? 'active' : ''} ${item.count ? 'pending' : ''}`}
               onClick={() => setTab(item.key)}
             >
               <span className="approval-nav-title">{item.title}</span>
