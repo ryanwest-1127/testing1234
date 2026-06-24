@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import JSZip from 'jszip';
 import {
@@ -444,12 +444,17 @@ function expenseClaimStatusFromItems(expenses, fallbackStatus = 'Submitted') {
   return fallbackStatus || 'Submitted';
 }
 
+function expenseItemEffectiveStatus(expense, claimStatus = 'Submitted') {
+  if (['Approved', 'Paid', 'Rejected'].includes(claimStatus)) return claimStatus;
+  return expense.applicationStatus || claimStatus || 'Submitted';
+}
+
 function expenseItemsWithApplicationMetadata(claim) {
   return (claim.expenses || []).map((expense) => ({
     ...expense,
     applicationId: expense.applicationId || claim.id,
     applicationSubmittedAt: expense.applicationSubmittedAt || claim.submittedAt || '',
-    applicationStatus: expense.applicationStatus || claim.status || 'Submitted',
+    applicationStatus: expenseItemEffectiveStatus(expense, claim.status),
     applicationManagerNote: expense.applicationManagerNote ?? claim.managerNote ?? ''
   }));
 }
@@ -832,6 +837,7 @@ function hasPasswordSetupParams() {
 
 export default function App() {
   const [session, setSession] = useState(null);
+  const lastProfileAccessRef = useRef('');
   const [authLoading, setAuthLoading] = useState(true);
   const [passwordSetupMode, setPasswordSetupMode] = useState(() => hasPasswordSetupParams());
   const [profileLoading, setProfileLoading] = useState(false);
@@ -902,6 +908,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const refreshProfileOnFocus = () => {
+      if (document.visibilityState === 'visible') {
+        setProfileReloadKey(key => key + 1);
+      }
+    };
+
+    window.addEventListener('focus', refreshProfileOnFocus);
+    document.addEventListener('visibilitychange', refreshProfileOnFocus);
+
+    return () => {
+      window.removeEventListener('focus', refreshProfileOnFocus);
+      document.removeEventListener('visibilitychange', refreshProfileOnFocus);
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     const loadBankHolidays = async () => {
@@ -937,6 +959,7 @@ export default function App() {
 
   useEffect(() => {
     if (!session) {
+      lastProfileAccessRef.current = '';
       setProfile(null);
       setProfileMissing(false);
       setProfileError('');
@@ -965,21 +988,34 @@ export default function App() {
         setProfileError(error.message);
       } else if (!data) {
         const fallbackUser = userForSession(session);
+        const nextAccessKey = `${fallbackUser.id}:${fallbackUser.role}`;
+        const accessChanged = lastProfileAccessRef.current !== nextAccessKey;
+        lastProfileAccessRef.current = nextAccessKey;
         setProfile(null);
         setProfileMissing(true);
         setActiveUser(fallbackUser);
-        setManagerDataMode('personal');
+        if (accessChanged) {
+          setManagerDataMode('personal');
+          setTab('dashboard');
+          setEntryHistoryView(null);
+          setReviewingClaimId(null);
+        }
       } else {
         const profileUser = userFromProfile(data, session);
+        const nextAccessKey = `${profileUser.id}:${profileUser.role}`;
+        const accessChanged = lastProfileAccessRef.current !== nextAccessKey;
+        lastProfileAccessRef.current = nextAccessKey;
         setProfile(data);
         setProfileMissing(false);
         setActiveUser(profileUser);
-        setManagerDataMode(profileUser.role === 'Manager' ? 'overall' : 'personal');
+        if (accessChanged) {
+          setManagerDataMode(profileUser.role === 'Manager' ? 'overall' : 'personal');
+          setTab('dashboard');
+          setEntryHistoryView(null);
+          setReviewingClaimId(null);
+        }
       }
 
-      setTab('dashboard');
-      setEntryHistoryView(null);
-      setReviewingClaimId(null);
       setProfileLoading(false);
     };
 
@@ -1098,7 +1134,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing, profileReloadKey]);
 
   useEffect(() => {
     if (!session || profileLoading || profileMissing) return;
@@ -1135,7 +1171,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing, profileReloadKey]);
 
   useEffect(() => {
     if (!session || profileLoading || profileMissing) return;
@@ -1164,7 +1200,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, profile?.id, profileLoading, profileMissing]);
+  }, [session?.user?.id, profile?.id, profileLoading, profileMissing, profileReloadKey]);
 
   const totals = useMemo(
   () => calculateTotals(timesheet, expenses, timeInLieu, standardHours),
@@ -1183,7 +1219,22 @@ export default function App() {
 
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const portalEmployees = profileUsers.length ? profileUsers : employees;
-  const companyEmployees = portalEmployees.filter(employee => employee.role !== 'Manager');
+  const profileCompanyUsers = profileUsers.length
+    ? portalEmployees.filter(employee => employee.id !== activeUser.id)
+    : portalEmployees.filter(employee => employee.role !== 'Manager');
+  const claimCompanyUsers = cleanClaims
+    .filter(claim => claim.employeeId && claim.employeeId !== activeUser.id)
+    .map(claim => ({
+      id: claim.employeeId,
+      name: claim.employeeName || claim.email || 'Unknown Employee',
+      email: claim.email || '',
+      department: claim.department || 'Production',
+      role: 'Employee'
+    }));
+  const companyEmployees = Object.values([...profileCompanyUsers, ...claimCompanyUsers].reduce((groups, employee) => {
+    groups[employee.id] = groups[employee.id] || employee;
+    return groups;
+  }, {}));
   const companyEmployeeIds = new Set(companyEmployees.map(employee => employee.id));
   const findPortalEmployee = (employeeId) =>
     portalEmployees.find(employee => employee.id === employeeId) ||
@@ -2212,7 +2263,7 @@ export default function App() {
             visibleClaims={visibleClaims}
             allEmployeeClaims={accountClaims}
             allLeaveRequests={accountLeaveRequests}
-            employees={employees}
+            employees={companyEmployees}
             profileUsers={profileUsers}
             viewEmployeeId={viewEmployeeId}
             setViewEmployeeId={setViewEmployeeId}
@@ -3108,8 +3159,22 @@ function Dashboard({
     }
   ];
 
-  const employeeDirectory = (profileUsers.length ? profileUsers : employees)
-    .filter(employee => employee.role !== 'Manager');
+  const profileDirectory = profileUsers.length ? profileUsers : employees;
+  const claimOnlyEmployees = (allEmployeeClaims || [])
+    .filter(claim => claim.employeeId && claim.employeeId !== activeUser.id)
+    .map(claim => ({
+      id: claim.employeeId,
+      name: claim.employeeName || claim.email || 'Unknown Employee',
+      email: claim.email || '',
+      department: claim.department || 'Production',
+      role: 'Employee'
+    }));
+  const employeeDirectory = Object.values([...profileDirectory, ...claimOnlyEmployees]
+    .filter(employee => employee.id !== activeUser.id)
+    .reduce((groups, employee) => {
+      groups[employee.id] = groups[employee.id] || employee;
+      return groups;
+    }, {}));
   const employeeIds = new Set(employeeDirectory.map(employee => employee.id));
   const managerPersonalSummary = isManager
     ? getDashboardSummary(managerPersonalClaims, selectedWeek, weeklyStandardHours, managerPersonalLeaveRequests, activeUser.annualLeaveAllowance || 28, bankHolidayEvents, leaveYear)
@@ -3138,7 +3203,7 @@ function Dashboard({
   const companyExpenseItems = companyExpenseClaims.flatMap(claim => (claim.expenses || []).map(expense => ({
     claim,
     expense,
-    status: expense.applicationStatus || claim.status || 'Submitted',
+    status: expenseItemEffectiveStatus(expense, claim.status),
     month: getClaimExpenseMonth(claim)
   })));
   const dashboardExpenseMonthOptions = Array.from(new Set(companyExpenseItems.map(item => item.month).filter(Boolean))).sort().reverse();
@@ -5253,7 +5318,7 @@ function ManagerAdminCategory({
     ? claims.flatMap(claim => (claim.expenses || []).map(expense => ({
         claim,
         expense,
-        status: expense.applicationStatus || claim.status || 'Submitted',
+        status: expenseItemEffectiveStatus(expense, claim.status),
         month: getClaimExpenseMonth(claim)
       })))
     : [];
@@ -5996,15 +6061,15 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
         const expenseItems = isExpense
           ? [...(c.expenses || [])].sort((a, b) => {
               const statusRank = { Submitted: 0, Approved: 1, Paid: 1, Rejected: 2 };
-              return (statusRank[a.applicationStatus || c.status || 'Submitted'] ?? 3) -
-                (statusRank[b.applicationStatus || c.status || 'Submitted'] ?? 3) ||
+              return (statusRank[expenseItemEffectiveStatus(a, c.status)] ?? 3) -
+                (statusRank[expenseItemEffectiveStatus(b, c.status)] ?? 3) ||
                 String(b.applicationSubmittedAt || '').localeCompare(String(a.applicationSubmittedAt || ''));
             })
           : [];
         const expenseStatus = isExpense ? (c.applicationStatus || c.status || 'Submitted') : c.status;
         const isLockedExpense = manager && isExpense && ['Approved', 'Paid', 'Rejected'].includes(expenseStatus) && !editingLockedExpenseIds[c.id];
         const canManageExpense = manager && isExpense && !managerReadOnly && !isLockedExpense;
-        const hasLockedExpenseRows = lockApprovedExpenseRows && expenseItems.some(expense => (expense.applicationStatus || c.status || 'Submitted') !== 'Submitted');
+        const hasLockedExpenseRows = lockApprovedExpenseRows && expenseItems.some(expense => expenseItemEffectiveStatus(expense, c.status) !== 'Submitted');
         const canEditLockedRows = Boolean(editingLockedExpenseIds[c.id]);
         const expenseDecisionAmount = (expense) =>
           expense.approvalStatus === 'rejected'
@@ -6026,7 +6091,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
         const setAllExpenseItemsApproved = (approved) => {
           updateExpenseItems(expense => ({
             ...expense,
-            ...(!lockApprovedExpenseRows || (expense.applicationStatus || c.status || 'Submitted') === 'Submitted' || canEditLockedRows
+            ...(!lockApprovedExpenseRows || expenseItemEffectiveStatus(expense, c.status) === 'Submitted' || canEditLockedRows
               ? {
                   approvalStatus: approved ? 'approved' : 'rejected',
                   approvedAmount: approved ? Number(expense.amount || 0) : (expense.approvedAmount || '')
@@ -6101,7 +6166,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
                       <tbody>
                         {expenseItems.map(e => {
                           const isItemApproved = e.approvalStatus !== 'rejected';
-                          const expenseRowStatus = e.applicationStatus || c.status || 'Submitted';
+                          const expenseRowStatus = expenseItemEffectiveStatus(e, c.status);
                           const canEditExpenseRow = canManageExpense && (!lockApprovedExpenseRows || expenseRowStatus === 'Submitted' || canEditLockedRows);
                           return (
                           <tr key={e.id}>
