@@ -971,7 +971,7 @@ export default function App() {
   const [expenseError, setExpenseError] = useState('');
   const [alMonth, setAlMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [highlightedLeaveId, setHighlightedLeaveId] = useState('');
-  const [selectedWeek, setSelectedWeek] = useState('2026-W21');
+  const [selectedWeek, setSelectedWeek] = useState(() => currentBusinessWeekValue());
   const [selectedExpenseMonth, setSelectedExpenseMonth] = useState(currentMonthValue());
 
   const [employeeInfo, setEmployeeInfo] = useState({
@@ -1757,6 +1757,7 @@ export default function App() {
     await saveTimesheetClaimToSupabase(savedClaim);
     setTimeInLieu({ used: '0' });
     setTimesheet(defaultTimesheet());
+    setSelectedWeek(currentBusinessWeekValue());
     setEmployeeInfo(p => ({ ...p, notes: '' }));
     setTab('dashboard');
   };
@@ -1775,6 +1776,7 @@ export default function App() {
     setClaims(nextClaims);
     await saveExpenseClaimToSupabase(savedClaim);
     setExpenses(savedClaim.expenses || newClaim.expenses || [makeExpense()]);
+    setSelectedExpenseMonth(currentMonthValue());
     setEmployeeInfo(p => ({ ...p, notes: '' }));
     setEditingClaimId(savedClaim.id);
     setEditingOriginalClaim(savedClaim);
@@ -5185,7 +5187,7 @@ function ManagerAnnualLeaveAdmin({
             </div>
           </div>
 
-          <div className="flex" style={{ justifyContent: 'flex-end' }}>
+          <div className="flex" style={{ justifyContent: 'flex-start' }}>
             <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
           </div>
         </>
@@ -5953,7 +5955,7 @@ function ManagerAdminCategory({
               </div>
             </>
           )}
-          <div className="flex" style={{ justifyContent: 'flex-end' }}>
+          <div className="flex" style={{ justifyContent: 'flex-start' }}>
             <button className="btn secondary" type="button" onClick={() => setSelectedEmployeeId('')}>Back to Summary</button>
           </div>
         </>
@@ -6078,7 +6080,7 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
             <h2>Expense Claim Detail</h2>
             <p className="small muted">{claim.employeeName} - {claim.periodLabel || monthLabel(getClaimExpenseMonth(claim))}</p>
           </div>
-          <div className="flex gap items-center" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div className="flex gap items-center" style={{ flexWrap: 'wrap', justifyContent: 'flex-start' }}>
             <div className="detail-view-switch" aria-label="Expense detail view mode">
               <button
                 className={detailViewMode === 'month' ? 'active' : ''}
@@ -6208,7 +6210,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
         <div className="space-y-sm" style={{ background: 'rgba(248,250,252,.82)', padding: 16, borderRadius: 20 }}>
           <label className="label">Manager Note</label>
           <textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} />
-          <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <div className="flex gap" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
             <button className="btn" type="button" onClick={() => updateClaim(claim.id, { status: 'Approved', managerNote: note })}>
               <CheckCircle2 size={16} /> Approve
             </button>
@@ -6455,7 +6457,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
               )}
 
               {managerReadOnly && isExpense && (
-                <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 16 }}>
+                <div className="flex gap" style={{ justifyContent: 'flex-start', flexWrap: 'wrap', marginTop: 16 }}>
                   <button
                     className="btn secondary"
                     type="button"
@@ -6477,7 +6479,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
                     onChange={e => updateClaim(c.id, { managerNote: e.target.value })}
                   />
 
-                  <div className="flex gap" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <div className="flex gap" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
                     <div>
                       {isLockedExpense && (
                         <button
@@ -6498,7 +6500,7 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
                         </button>
                       )}
                     </div>
-                    <div className="flex gap" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                    <div className="flex gap" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
                     {isExpense && (
                       <button
                         className="btn secondary"
