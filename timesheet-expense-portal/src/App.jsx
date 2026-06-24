@@ -1183,6 +1183,8 @@ export default function App() {
 
   const cleanClaims = uniqueClaimsByEmployeeWeekType(claims);
   const portalEmployees = profileUsers.length ? profileUsers : employees;
+  const companyEmployees = portalEmployees.filter(employee => employee.role !== 'Manager');
+  const companyEmployeeIds = new Set(companyEmployees.map(employee => employee.id));
   const findPortalEmployee = (employeeId) =>
     portalEmployees.find(employee => employee.id === employeeId) ||
     employees.find(employee => employee.id === employeeId) ||
@@ -1226,16 +1228,15 @@ export default function App() {
     () => getDashboardSummary(topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, annualLeaveAllowanceFor(activeUser.id), bankHolidayEvents, currentLeaveYear),
     [topCardClaims, selectedWeek, weeklyStandardHours, topCardLeaveRequests, activeUser.id, profileUsers, bankHolidayEvents, currentLeaveYear]
   );
-  const companyTopCardClaims = cleanClaims.filter(c => employees.some(employee => employee.role !== 'Manager' && employee.id === c.employeeId));
-  const companyTopCardLeaveRequests = leaveRequests.filter(r => employees.some(employee => employee.role !== 'Manager' && employee.id === r.employeeId));
+  const companyTopCardClaims = cleanClaims.filter(c => companyEmployeeIds.has(c.employeeId));
+  const companyTopCardLeaveRequests = leaveRequests.filter(r => companyEmployeeIds.has(r.employeeId));
   const companyTopCardSummary = useMemo(
     () => getDashboardSummary(companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests, 28, bankHolidayEvents, currentLeaveYear),
     [companyTopCardClaims, selectedWeek, weeklyStandardHours, companyTopCardLeaveRequests, bankHolidayEvents, currentLeaveYear]
   );
   const companyAlSubmitted = companyTopCardLeaveRequests.filter(request => request.status === 'Submitted').length;
   const companyAlApproved = companyTopCardLeaveRequests.filter(request => request.status === 'Approved').length;
-  const companyTilByEmployee = employees
-    .filter(employee => employee.role !== 'Manager')
+  const companyTilByEmployee = companyEmployees
     .map(employee => {
       const employeeClaims = companyTopCardClaims.filter(claim => claim.employeeId === employee.id && claimTypeOf(claim) === 'timesheet');
       const balance = employeeClaims.reduce(
@@ -1279,6 +1280,12 @@ export default function App() {
     setEntryHistoryView(null);
     setTab('dashboard');
     setViewEmployeeId(mode === 'overall' ? 'All' : activeUser.id);
+  };
+
+  const openTab = (nextTab) => {
+    setReviewingClaimId(null);
+    setEntryHistoryView(null);
+    setTab(nextTab);
   };
 
   const filteredClaims = visibleClaims.filter(c => {
@@ -2217,7 +2224,7 @@ export default function App() {
             selectedWeek={selectedWeek}
             managerDataMode={managerDataMode}
             openClaimForReview={openClaimForReview}
-            setTab={setTab}
+            setTab={openTab}
             setAlMonth={setAlMonth}
             setHighlightedLeaveId={setHighlightedLeaveId}
             reloadProfiles={() => setProfileReloadKey(key => key + 1)}
@@ -2234,7 +2241,7 @@ export default function App() {
               setReceipt={setReceipt}
               closeReview={() => {
                 setReviewingClaimId(null);
-                setTab('dashboard');
+                openTab('dashboard');
               }}
             />
           ) : activeUser.role === 'Manager' && managerDataMode === 'overall' ? (
@@ -2246,8 +2253,8 @@ export default function App() {
               profileUsers={profileUsers}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
-              closeAdmin={() => setTab('dashboard')}
-              setTab={setTab}
+              closeAdmin={() => openTab('dashboard')}
+              setTab={openTab}
               currentTab="timesheet"
               approvalCounts={{
                 annualLeave: companyAlSubmitted,
@@ -2306,7 +2313,7 @@ export default function App() {
               setReceipt={setReceipt}
               closeReview={() => {
                 setReviewingClaimId(null);
-                setTab('dashboard');
+                openTab('dashboard');
               }}
             />
           ) : activeUser.role === 'Manager' && managerDataMode === 'overall' ? (
@@ -2318,8 +2325,8 @@ export default function App() {
               profileUsers={profileUsers}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
-              closeAdmin={() => setTab('dashboard')}
-              setTab={setTab}
+              closeAdmin={() => openTab('dashboard')}
+              setTab={openTab}
               currentTab="expense"
               approvalCounts={{
                 annualLeave: companyAlSubmitted,
@@ -2376,8 +2383,8 @@ export default function App() {
               profileUsers={profileUsers}
               bankHolidayEvents={bankHolidayEvents}
               updateLeaveRequest={updateLeaveRequest}
-              closeAdmin={() => setTab('dashboard')}
-              setTab={setTab}
+              closeAdmin={() => openTab('dashboard')}
+              setTab={openTab}
               approvalCounts={{
                 annualLeave: companyAlSubmitted,
                 timesheets: accountClaims.filter(claim => claimTypeOf(claim) === 'timesheet' && claim.status === 'Submitted').length,
@@ -2538,7 +2545,7 @@ export default function App() {
         {tab === 'management' && activeUser.role === 'Manager' && managerDataMode === 'overall' && (
           <div className="space-y">
             <ApprovalDashboardNav
-              setTab={setTab}
+              setTab={openTab}
               currentTab="management"
               counts={{
                 annualLeave: companyAlSubmitted,
