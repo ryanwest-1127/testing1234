@@ -685,6 +685,10 @@ function expensesMissingReceipts(expenses) {
   return (expenses || []).some(expense => !expense.noPhotoProof && (!expense.receiptName || !expense.receiptPreview));
 }
 
+function receiptPathsFromExpenses(expenses) {
+  return Array.from(new Set((expenses || []).map(expense => expense.receiptPath).filter(Boolean)));
+}
+
 function getDashboardSummary(
   claims,
   selectedWeek,
@@ -1656,6 +1660,22 @@ export default function App() {
     await saveTimesheetClaimToSupabase(updatedClaim);
   };
 
+  const deleteTimesheetClaimFromSupabase = async (claim) => {
+    if (!claim?.id || claimTypeOf(claim) !== 'timesheet' || !isUuid(claim.employeeId)) return;
+
+    const { error } = await supabase
+      .from('timesheet_claims')
+      .delete()
+      .eq('id', claim.id);
+
+    if (error) {
+      setTimesheetSyncStatus(`Timesheet delete warning: ${error.message}`);
+      return;
+    }
+
+    setTimesheetSyncStatus('Timesheet deleted from Supabase.');
+  };
+
   const saveAnnualLeaveRequestToSupabase = async (request) => {
     if (!request || !isUuid(request.employeeId)) {
       const message = 'Annual leave sync skipped because this account is not linked to a Supabase profile id yet.';
@@ -1730,6 +1750,38 @@ export default function App() {
     await saveExpenseClaimToSupabase(updatedClaim);
   };
 
+  const removeReceiptFilesFromSupabase = async (paths) => {
+    const safePaths = Array.from(new Set(paths || [])).filter(Boolean);
+    if (!safePaths.length) return;
+
+    const { error } = await supabase
+      .storage
+      .from('receipt-proofs')
+      .remove(safePaths);
+
+    if (error) {
+      setDataSyncStatus(`Receipt delete warning: ${error.message}`);
+    }
+  };
+
+  const deleteExpenseClaimFromSupabase = async (claim) => {
+    if (!claim?.id || claimTypeOf(claim) !== 'expense' || !isUuid(claim.employeeId)) return;
+
+    await removeReceiptFilesFromSupabase(receiptPathsFromExpenses(claim.expenses));
+
+    const { error } = await supabase
+      .from('expense_claims')
+      .delete()
+      .eq('id', claim.id);
+
+    if (error) {
+      setDataSyncStatus(`Expense delete warning: ${error.message}`);
+      return;
+    }
+
+    setDataSyncStatus('Expense deleted from Supabase.');
+  };
+
   const buildExpenseClaim = status => {
     const baseClaim = commonClaimFields(status);
     const applicationSubmittedAt = baseClaim.submittedAt || new Date().toLocaleString('en-GB');
@@ -1801,6 +1853,63 @@ export default function App() {
 
     if (existingClaim && claimTypeOf(existingClaim) === 'expense') {
       patchExpenseClaimInSupabase(existingClaim, patch);
+    }
+  };
+
+  const deleteClaim = async (claimOrId) => {
+    const targetClaim = typeof claimOrId === 'string'
+      ? claims.find(claim => claim.id === claimOrId)
+      : claimOrId;
+
+    if (!targetClaim) return;
+
+    if (targetClaim.parentClaimId && targetClaim.applicationKey) {
+      const parentClaim = claims.find(claim => claim.id === targetClaim.parentClaimId);
+      if (!parentClaim || claimTypeOf(parentClaim) !== 'expense') return;
+
+      const nextExpenses = (parentClaim.expenses || []).filter((expense, index) => (
+        expenseApplicationKey(expense, parentClaim, index) !== targetClaim.applicationKey
+      ));
+      const deletedExpenses = (parentClaim.expenses || []).filter((expense, index) => (
+        expenseApplicationKey(expense, parentClaim, index) === targetClaim.applicationKey
+      ));
+
+      if (!nextExpenses.length) {
+        setClaims(prev => prev.filter(claim => claim.id !== parentClaim.id));
+        await deleteExpenseClaimFromSupabase(parentClaim);
+        return;
+      }
+
+      const totalExpense = nextExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+      const totalVAT = nextExpenses.reduce((sum, expense) => sum + Number(expense.vat || 0), 0);
+      const approvedAmount = nextExpenses.reduce((sum, expense) => sum + expenseApprovedAmount(expense), 0);
+      const updatedParentClaim = {
+        ...parentClaim,
+        expenses: nextExpenses,
+        totals: {
+          ...(parentClaim.totals || {}),
+          totalExpense,
+          totalVAT
+        },
+        approvedAmount,
+        status: expenseClaimStatusFromItems(nextExpenses, parentClaim.status || 'Submitted'),
+        updatedAt: new Date().toLocaleString('en-GB')
+      };
+
+      setClaims(prev => prev.map(claim => claim.id === parentClaim.id ? updatedParentClaim : claim));
+      await removeReceiptFilesFromSupabase(receiptPathsFromExpenses(deletedExpenses));
+      await saveExpenseClaimToSupabase(updatedParentClaim);
+      return;
+    }
+
+    setClaims(prev => prev.filter(claim => claim.id !== targetClaim.id));
+
+    if (claimTypeOf(targetClaim) === 'timesheet') {
+      await deleteTimesheetClaimFromSupabase(targetClaim);
+    }
+
+    if (claimTypeOf(targetClaim) === 'expense') {
+      await deleteExpenseClaimFromSupabase(targetClaim);
     }
   };
 
@@ -2092,6 +2201,14 @@ export default function App() {
     if (existingRequest?.employeeId === activeUser.id && existingRequest.status === 'Submitted') {
       deleteAnnualLeaveRequestFromSupabase(existingRequest);
     }
+  };
+
+  const deleteLeaveRequest = async (id) => {
+    const existingRequest = leaveRequests.find(request => request.id === id);
+    if (!existingRequest) return;
+
+    setLeaveRequests(prev => prev.filter(request => request.id !== id));
+    await deleteAnnualLeaveRequestFromSupabase(existingRequest);
   };
 
   const selectAnnualLeaveDate = (date) => {
@@ -2393,6 +2510,7 @@ export default function App() {
             <ManagerClaimReview
               claim={reviewingClaim}
               updateClaim={updateClaim}
+              deleteClaim={deleteClaim}
               setReceipt={setReceipt}
               closeReview={() => {
                 setReviewingClaimId(null);
@@ -2408,6 +2526,7 @@ export default function App() {
               profileUsers={companyEmployees}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
+              deleteClaim={deleteClaim}
               closeAdmin={() => openTab('dashboard')}
               setTab={openTab}
               currentTab="timesheet"
@@ -2465,6 +2584,7 @@ export default function App() {
             <ManagerClaimReview
               claim={reviewingClaim}
               updateClaim={updateClaim}
+              deleteClaim={deleteClaim}
               setReceipt={setReceipt}
               closeReview={() => {
                 setReviewingClaimId(null);
@@ -2480,6 +2600,7 @@ export default function App() {
               profileUsers={companyEmployees}
               setReceipt={setReceipt}
               updateClaim={updateClaim}
+              deleteClaim={deleteClaim}
               closeAdmin={() => openTab('dashboard')}
               setTab={openTab}
               currentTab="expense"
@@ -2539,6 +2660,7 @@ export default function App() {
               profileUsers={companyEmployees}
               bankHolidayEvents={bankHolidayEvents}
               updateLeaveRequest={updateLeaveRequest}
+              deleteLeaveRequest={deleteLeaveRequest}
               closeAdmin={() => openTab('dashboard')}
               setTab={openTab}
               approvalCounts={{
@@ -4962,6 +5084,7 @@ function ManagerAnnualLeaveAdmin({
   employees,
   profileUsers = [],
   updateLeaveRequest,
+  deleteLeaveRequest,
   closeAdmin,
   setTab,
   approvalCounts,
@@ -5133,14 +5256,15 @@ function ManagerAnnualLeaveAdmin({
               readOnly
             />
 
-            <AnnualLeaveRequestsPanel
-              requests={selectedEmployeeDisplayRequests}
-              request={selectedEmployeeSelectedRequest}
-              selectedRequestId={selectedRequestId}
-              setSelectedRequestId={setSelectedRequestId}
-              updateLeaveRequest={updateLeaveRequest}
-              bankHolidayDateSet={managerBankHolidayDateSet}
-            />
+              <AnnualLeaveRequestsPanel
+                requests={selectedEmployeeDisplayRequests}
+                request={selectedEmployeeSelectedRequest}
+                selectedRequestId={selectedRequestId}
+                setSelectedRequestId={setSelectedRequestId}
+                updateLeaveRequest={updateLeaveRequest}
+                deleteLeaveRequest={deleteLeaveRequest}
+                bankHolidayDateSet={managerBankHolidayDateSet}
+              />
           </div>
 
           <div className="card">
@@ -5288,7 +5412,7 @@ function AnnualLeaveCalendar({ alMonth, setAlMonth, alBlanks, alDays, leaveReque
   );
 }
 
-function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSelectedRequestId, updateLeaveRequest, bankHolidayDateSet = new Set() }) {
+function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSelectedRequestId, updateLeaveRequest, deleteLeaveRequest, bankHolidayDateSet = new Set() }) {
   const [note, setNote] = useState('');
   const selectedIndex = Math.max(0, requests.findIndex(item => item.id === selectedRequestId));
   const canMovePrevious = requests.length > 1 && selectedIndex > 0;
@@ -5355,12 +5479,29 @@ function AnnualLeaveRequestsPanel({ requests, request, selectedRequestId, setSel
               />
             </div>
 
-            {canManagerAction ? (
-              <div className="flex gap" style={{ flexWrap: 'wrap' }}>
-                <button className="btn" type="button" onClick={() => updateLeaveRequest(request.id, { status: 'Approved', managerNote: note })}>Approve</button>
-                <button className="btn danger" type="button" onClick={() => updateLeaveRequest(request.id, { status: 'Rejected', managerNote: note })}>Reject</button>
-              </div>
-            ) : (
+            <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+              {canManagerAction && (
+                <>
+                  <button className="btn" type="button" onClick={() => updateLeaveRequest(request.id, { status: 'Approved', managerNote: note })}>Approve</button>
+                  <button className="btn danger" type="button" onClick={() => updateLeaveRequest(request.id, { status: 'Rejected', managerNote: note })}>Reject</button>
+                </>
+              )}
+              {deleteLeaveRequest && (
+                <button
+                  className="btn danger"
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Delete this annual leave request? This cannot be undone.')) {
+                      deleteLeaveRequest(request.id);
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+
+            {!canManagerAction && (
               <p className="small muted">This request is locked because it is no longer pending.</p>
             )}
           </>
@@ -5455,7 +5596,7 @@ function AnnualLeaveRequestTable({ requests, updateLeaveRequest, highlightedLeav
   );
 }
 
-function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
+function ManagerClaimReview({ claim, updateClaim, deleteClaim, setReceipt, closeReview }) {
   const isExpense = claimTypeOf(claim) === 'expense';
 
   return (
@@ -5482,6 +5623,7 @@ function ManagerClaimReview({ claim, updateClaim, setReceipt, closeReview }) {
         setReceipt={setReceipt}
         manager
         updateClaim={updateClaim}
+        deleteClaim={deleteClaim}
       />
     </div>
   );
@@ -5495,6 +5637,7 @@ function ManagerAdminCategory({
   profileUsers = [],
   setReceipt,
   updateClaim,
+  deleteClaim,
   closeAdmin,
   setTab,
   currentTab,
@@ -5856,6 +5999,7 @@ function ManagerAdminCategory({
                 setSelectedClaimId={setSelectedClaimId}
                 setReceipt={setReceipt}
                 updateClaim={updateClaim}
+                deleteClaim={deleteClaim}
               />
 
               <div className="card">
@@ -5906,6 +6050,7 @@ function ManagerAdminCategory({
                 selectedClaimId={selectedClaimId}
                 setSelectedClaimId={setSelectedClaimId}
                 updateClaim={updateClaim}
+                deleteClaim={deleteClaim}
               />
 
               <div className="card">
@@ -6006,7 +6151,7 @@ function expenseApplicationClaimsFromMonthlyClaim(claim) {
   });
 }
 
-function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, setReceipt, updateClaim }) {
+function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, setReceipt, updateClaim, deleteClaim }) {
   const [detailViewMode, setDetailViewMode] = useState('month');
   const selectedIndex = Math.max(0, claims.findIndex(item => item.id === selectedClaimId));
   const canMovePrevious = claims.length > 1 && selectedIndex > 0;
@@ -6097,6 +6242,7 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
           manager
           lockApprovedExpenseRows
           updateClaim={updateClaim}
+          deleteClaim={deleteClaim}
         />
       ) : (
         <ClaimList
@@ -6104,13 +6250,14 @@ function ExpenseApprovalDetail({ claims, claim, selectedClaimId, setSelectedClai
           setReceipt={setReceipt}
           manager
           updateClaim={updateExpenseApplication}
+          deleteClaim={deleteClaim}
         />
       )}
     </div>
   );
 }
 
-function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, updateClaim }) {
+function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedClaimId, updateClaim, deleteClaim }) {
   const [note, setNote] = useState('');
   const [weekPickerMessage, setWeekPickerMessage] = useState('');
   const selectedIndex = Math.max(0, claims.findIndex(item => item.id === selectedClaimId));
@@ -6223,6 +6370,19 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
             <button className="btn danger" type="button" onClick={() => updateClaim(claim.id, { status: 'Rejected', managerNote: note })}>
               <XCircle size={16} /> Reject
             </button>
+            {deleteClaim && (
+              <button
+                className="btn danger"
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Delete this timesheet application? This cannot be undone.')) {
+                    deleteClaim(claim);
+                  }
+                }}
+              >
+                Delete
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -6230,7 +6390,7 @@ function TimesheetApprovalDetail({ claims, claim, selectedClaimId, setSelectedCl
   );
 }
 
-function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockApprovedExpenseRows = false, updateClaim, startEditClaim, activeUser }) {
+function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockApprovedExpenseRows = false, updateClaim, deleteClaim, startEditClaim, activeUser }) {
   const [editingLockedExpenseIds, setEditingLockedExpenseIds] = useState({});
 
   if (!claims.length) {
@@ -6507,6 +6667,22 @@ function ClaimList({ claims, setReceipt, manager, managerReadOnly = false, lockA
                         onClick={() => downloadReceiptItems(claimReceiptItems, { asZip: true, zipName: claimReceiptZipName })}
                       >
                         Download This Application Proofs ({claimReceiptItems.length})
+                      </button>
+                    )}
+                    {deleteClaim && (
+                      <button
+                        className="btn danger"
+                        type="button"
+                        onClick={() => {
+                          const recordLabel = isExpense
+                            ? (c.parentClaimId ? 'this expense application' : 'this expense claim month')
+                            : 'this application';
+                          if (window.confirm(`Delete ${recordLabel}? This cannot be undone.`)) {
+                            deleteClaim(c);
+                          }
+                        }}
+                      >
+                        Delete
                       </button>
                     )}
                     {!isLockedExpense && (
